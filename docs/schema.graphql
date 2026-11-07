@@ -1,0 +1,156 @@
+type Query {
+  """Paginated exam list with Connection spec (cursor pagination)."""
+  exams(
+    first: Int = 20
+    after: String
+    status: String
+    category: String
+    min_price: Float
+    max_price: Float
+    sort: String = "created_at"
+    order: String = "desc"
+  ): ExamConnection!
+
+  """Fetch a single exam by ID."""
+  exam(examId: String!): Exam
+
+  """List all exam centers."""
+  examCenters: [ExamCenter!]!
+
+  """Find exam centers within radius_km of a point (Map API)."""
+  nearbyExamCenters(
+    latitude: Float!
+    longitude: Float!
+    radius_km: Float = 50.0
+  ): [ExamCenter!]!
+
+  """
+  List exam slots within a time window (Calendar API).
+  starts_at and ends_at are ISO 8601 UTC strings.
+  """
+  examSlots(
+    starts_at: DateTime
+    ends_at: DateTime
+    examId: String
+  ): [ExamSlot!]!
+
+  """Current user's registrations. Requires Bearer token."""
+  myRegistrations: [Registration!]!
+}
+
+type Mutation {
+  """Issue a JWT token."""
+  authenticate(username: String!, password: String!): AuthPayload!
+
+  """
+  Register for an exam slot.
+  Returns RegistrationResult — check the error field for domain errors.
+  Possible error codes: SLOT_NOT_FOUND, SLOT_FULL, SLOT_CONFLICT,
+  ALREADY_REGISTERED, EXAM_CANCELLED, TOKEN_INVALID.
+  """
+  registerForSlot(slotId: String!): RegistrationResult!
+
+  """Cancel an existing registration."""
+  cancelRegistration(slotId: String!): RegistrationResult!
+}
+
+# ── Pagination (Connection spec) ─────────────────────────────────────────────
+
+type ExamConnection {
+  edges: [ExamEdge!]!
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+type ExamEdge {
+  node: Exam!
+  cursor: String!
+}
+
+type PageInfo {
+  hasNextPage: Boolean!
+  hasPreviousPage: Boolean!
+  startCursor: String
+  endCursor: String
+}
+
+# ── Domain types ─────────────────────────────────────────────────────────────
+
+type Exam {
+  id: String!
+  title: String!
+  """Maps to the subject of the exam; use category for new code."""
+  category: String!
+  """
+  @deprecated Use category instead.
+  """
+  subject: String @deprecated(reason: "Use category — subject will be removed in v2")
+  description: String
+  durationMinutes: Int!
+  totalMarks: Int!
+  passingMarks: Int!
+  fee: Float!
+  status: String!
+  createdAt: DateTime
+}
+
+type ExamCenter {
+  id: String!
+  name: String!
+  address: String!
+  city: String!
+  state: String!
+  capacity: Int!
+  contactEmail: String
+  """GeoJSON position: [longitude, latitude]"""
+  coordinates: Coordinates!
+  """Populated only for nearbyExamCenters queries."""
+  distanceKm: Float
+}
+
+type Coordinates {
+  longitude: Float!
+  latitude: Float!
+}
+
+type ExamSlot {
+  id: String!
+  examId: String!
+  centerId: String!
+  startsAt: DateTime!
+  endsAt: DateTime!
+  capacity: Int!
+  availableSeats: Int!
+}
+
+type Registration {
+  id: String!
+  studentId: String!
+  slotId: String!
+  status: String!
+  score: Float
+  grade: String
+  registeredAt: DateTime
+}
+
+type AuthPayload {
+  token: String!
+  tokenType: String!
+  expiresIn: Int!
+}
+
+# ── Result union (structured errors) ─────────────────────────────────────────
+
+type RegistrationResult {
+  registration: Registration
+  error: DomainError
+}
+
+type DomainError {
+  code: String!
+  message: String!
+}
+
+# ── Scalars ───────────────────────────────────────────────────────────────────
+
+scalar DateTime

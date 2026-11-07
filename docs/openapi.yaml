@@ -1,0 +1,678 @@
+openapi: "3.1.0"
+info:
+  title: Exam Evaluation & Scheduling System
+  version: "1.0.0"
+  description: >
+    REST API (Approach A) for exam scheduling, geospatial centre lookup,
+    and conflict-aware slot registration. Team APIBP23N.
+servers:
+  - url: http://localhost:8080
+    description: Local (docker compose)
+
+tags:
+  - name: auth
+    description: Token issuance
+  - name: exams
+    description: List API — filtering, sorting, cursor pagination
+  - name: exam-centers
+    description: Map API — geospatial proximity and bounding-box search
+  - name: exam-slots
+    description: Calendar API — time-window queries and conflict-aware booking
+  - name: registrations
+    description: View and manage registrations
+  - name: ops
+    description: Health and meta endpoints
+
+# ── Security ─────────────────────────────────────────────────────────────────
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          example: EXAM_NOT_FOUND
+        message:
+          type: string
+          example: Exam 'exam-999' not found
+
+    ErrorEnvelope:
+      type: object
+      required: [detail]
+      properties:
+        detail:
+          $ref: "#/components/schemas/Error"
+
+    TokenRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          example: demo
+        password:
+          type: string
+          example: demo-password
+
+    TokenResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        token_type:
+          type: string
+          example: bearer
+        expires_in:
+          type: integer
+          example: 28800
+
+    Exam:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        category:
+          type: string
+          description: Subject of the exam
+        subject:
+          type: string
+          deprecated: true
+          description: Deprecated — use category
+        description:
+          type: string
+          nullable: true
+        duration_minutes:
+          type: integer
+        total_marks:
+          type: integer
+        passing_marks:
+          type: integer
+        fee:
+          type: number
+          format: float
+        status:
+          type: string
+          enum: [scheduled, ongoing, completed, cancelled]
+        created_at:
+          type: string
+          format: date-time
+
+    ExamCenter:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        address:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        capacity:
+          type: integer
+        contact_email:
+          type: string
+          nullable: true
+        coordinates:
+          type: array
+          description: "GeoJSON position: [longitude, latitude]"
+          items:
+            type: number
+          minItems: 2
+          maxItems: 2
+        distance_km:
+          type: number
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    ExamSlot:
+      type: object
+      properties:
+        id:
+          type: string
+        exam_id:
+          type: string
+        center_id:
+          type: string
+        starts_at:
+          type: string
+          format: date-time
+        ends_at:
+          type: string
+          format: date-time
+        capacity:
+          type: integer
+        available_seats:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    Registration:
+      type: object
+      properties:
+        id:
+          type: string
+        student_id:
+          type: string
+        slot_id:
+          type: string
+        status:
+          type: string
+          enum: [registered, confirmed, cancelled, completed]
+        score:
+          type: number
+          nullable: true
+        grade:
+          type: string
+          nullable: true
+        registered_at:
+          type: string
+          format: date-time
+          nullable: true
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid Bearer token
+      headers:
+        RateLimit-Limit: { schema: { type: integer } }
+        RateLimit-Remaining: { schema: { type: integer } }
+        RateLimit-Reset: { schema: { type: integer } }
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          example:
+            detail:
+              code: TOKEN_INVALID
+              message: Missing Bearer token
+
+    Forbidden:
+      description: Authenticated but insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+          example:
+            detail:
+              code: FORBIDDEN
+              message: "Requires role: instructor, admin"
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+
+    Conflict:
+      description: Business-rule conflict (full slot, overlapping booking, duplicate)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+
+    UnprocessableEntity:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+
+    TooManyRequests:
+      description: Rate limit exceeded
+      headers:
+        RateLimit-Limit: { schema: { type: integer }, example: 100 }
+        RateLimit-Remaining: { schema: { type: integer }, example: 0 }
+        RateLimit-Reset: { schema: { type: integer } }
+        Retry-After: { schema: { type: integer } }
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: object
+                properties:
+                  code: { type: string, example: RATE_LIMITED }
+                  message: { type: string }
+                  retry_after: { type: integer }
+
+# ── Paths ─────────────────────────────────────────────────────────────────────
+paths:
+  /health:
+    get:
+      tags: [ops]
+      summary: Health check
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+
+  /api/v1/auth/token:
+    post:
+      tags: [auth]
+      summary: Issue a JWT access token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TokenRequest"
+      responses:
+        "200":
+          description: Token issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                detail:
+                  code: INVALID_CREDENTIALS
+                  message: Incorrect username or password
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /api/v1/exams:
+    get:
+      tags: [exams]
+      summary: List exams — filtering, sorting, cursor pagination
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [scheduled, ongoing, completed, cancelled] }
+        - name: category
+          in: query
+          description: Subject substring match
+          schema: { type: string }
+        - name: min_price
+          in: query
+          schema: { type: number, minimum: 0 }
+        - name: max_price
+          in: query
+          schema: { type: number, minimum: 0 }
+        - name: sort
+          in: query
+          schema: { type: string, default: created_at }
+        - name: order
+          in: query
+          schema: { type: string, enum: [asc, desc], default: desc }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: after
+          in: query
+          description: Opaque cursor from previous page's next_cursor
+          schema: { type: string }
+      responses:
+        "200":
+          description: Paginated exam list
+          headers:
+            RateLimit-Limit: { schema: { type: integer } }
+            RateLimit-Remaining: { schema: { type: integer } }
+            RateLimit-Reset: { schema: { type: integer } }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Exam"
+                  has_more:
+                    type: boolean
+                  next_cursor:
+                    type: string
+                    nullable: true
+                  limit:
+                    type: integer
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+    post:
+      tags: [exams]
+      summary: Create an exam (instructor / admin)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, subject, duration_minutes, total_marks, passing_marks, fee]
+              properties:
+                title: { type: string }
+                subject: { type: string }
+                description: { type: string }
+                duration_minutes: { type: integer }
+                total_marks: { type: integer }
+                passing_marks: { type: integer }
+                fee: { type: number }
+                status: { type: string, default: scheduled }
+      responses:
+        "201":
+          description: Exam created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Exam"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /api/v1/exams/{exam_id}:
+    get:
+      tags: [exams]
+      summary: Get a single exam
+      parameters:
+        - name: exam_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Exam detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Exam"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/exam-centers:
+    get:
+      tags: [exam-centers]
+      summary: List all exam centers
+      responses:
+        "200":
+          description: Center list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ExamCenter"
+                  count: { type: integer }
+
+  /api/v1/exam-centers/nearby:
+    get:
+      tags: [exam-centers]
+      summary: Proximity search — exam centres within radius_km
+      parameters:
+        - name: latitude
+          in: query
+          required: true
+          schema: { type: number, minimum: -90, maximum: 90 }
+        - name: longitude
+          in: query
+          required: true
+          schema: { type: number, minimum: -180, maximum: 180 }
+        - name: radius_km
+          in: query
+          schema: { type: number, default: 50.0, exclusiveMinimum: 0 }
+      responses:
+        "200":
+          description: Centers sorted by distance (nearest first)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ExamCenter"
+                  count: { type: integer }
+
+  /api/v1/exam-centers/bbox:
+    get:
+      tags: [exam-centers]
+      summary: Bounding-box search — exam centres inside SW/NE rectangle
+      parameters:
+        - name: min_lat
+          in: query
+          required: true
+          schema: { type: number }
+        - name: min_lon
+          in: query
+          required: true
+          schema: { type: number }
+        - name: max_lat
+          in: query
+          required: true
+          schema: { type: number }
+        - name: max_lon
+          in: query
+          required: true
+          schema: { type: number }
+      responses:
+        "200":
+          description: Centers inside the bounding box
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ExamCenter"
+                  count: { type: integer }
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /api/v1/exam-centers/{center_id}:
+    get:
+      tags: [exam-centers]
+      summary: Get a single exam center
+      parameters:
+        - name: center_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Center detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExamCenter"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/exam-slots:
+    get:
+      tags: [exam-slots]
+      summary: List exam slots — optional ISO 8601 time-window filter
+      parameters:
+        - name: starts_at
+          in: query
+          description: ISO 8601 UTC window start
+          schema: { type: string, format: date-time }
+        - name: ends_at
+          in: query
+          description: ISO 8601 UTC window end
+          schema: { type: string, format: date-time }
+        - name: exam_id
+          in: query
+          schema: { type: string }
+        - name: center_id
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Slots list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ExamSlot"
+                  count: { type: integer }
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /api/v1/exam-slots/{slot_id}:
+    get:
+      tags: [exam-slots]
+      summary: Get a single exam slot
+      parameters:
+        - name: slot_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Slot detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExamSlot"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/exam-slots/{slot_id}/register:
+    post:
+      tags: [exam-slots]
+      summary: Register for a slot — 409 on conflict or full slot
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: slot_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "201":
+          description: Registration created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Registration"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: "Conflict — slot full, overlap, or duplicate"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                SlotFull:
+                  value: { detail: { code: SLOT_FULL, message: No available seats in this slot } }
+                SlotConflict:
+                  value: { detail: { code: SLOT_CONFLICT, message: Overlapping exam already scheduled } }
+                AlreadyRegistered:
+                  value: { detail: { code: ALREADY_REGISTERED, message: You are already registered for this slot } }
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+    delete:
+      tags: [exam-slots]
+      summary: Cancel your registration for a slot
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: slot_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Registration cancelled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  registration_id: { type: string }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/registrations:
+    get:
+      tags: [registrations]
+      summary: My registrations
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: List of registrations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Registration"
+                  count: { type: integer }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/registrations/{reg_id}:
+    get:
+      tags: [registrations]
+      summary: Get a single registration
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: reg_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Registration detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Registration"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
