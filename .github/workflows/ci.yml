@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  build-lint-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Lint (ruff)
+        run: |
+          pip install ruff
+          ruff check src/ tests/ --select E,F,W --ignore E501
+
+      - name: Run tests
+        env:
+          DATABASE_URL: "sqlite+aiosqlite:///./data/test_exam_eval.db"
+          SECRET_KEY: "ci-test-secret"
+        run: |
+          mkdir -p data
+          pytest tests/ -v --tb=short
+
+      - name: Docker Compose smoke test
+        run: |
+          docker compose up -d --build
+          echo "Waiting for service..."
+          timeout 120 bash -c 'until curl -sf http://localhost:8080/health; do sleep 2; done'
+          curl -sf http://localhost:8080/health | grep '"status": "ok"'
+          curl -sf http://localhost:8080/api/v1/exams | grep '"has_more"'
+          docker compose down
