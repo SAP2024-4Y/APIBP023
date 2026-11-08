@@ -6,7 +6,7 @@ Course: API Design & Best Practices | Section: CS-401 | Instructor: TBD
 
 | # | Name         | Roll No   | GitHub ID  | Email                |
 |---|--------------|-----------|------------|----------------------|
-| 1 | Baibhab Dey  | 22CS3001  | Baibhab23  | baibhabd17@gmail.com |
+| 1 | Baibhab Dey  | 2024sl70019  | Baibhab23  | baibhabd17@gmail.com |
 
 - Team ID: `APIBP023` (must equal the repository name and `team.json.team_id`)
 - Chosen Approach: `A` — REST-First + GraphQL Layer
