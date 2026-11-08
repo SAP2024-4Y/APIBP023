@@ -1,4 +1,4 @@
-# APIBP23N — Exam Evaluation & Scheduling System
+# APIBP023 — Exam Evaluation & Scheduling System
 
 Course: API Design & Best Practices | Section: CS-401 | Instructor: TBD
 
@@ -8,7 +8,7 @@ Course: API Design & Best Practices | Section: CS-401 | Instructor: TBD
 |---|--------------|-----------|------------|----------------------|
 | 1 | Baibhab Dey  | 22CS3001  | Baibhab23  | baibhabd17@gmail.com |
 
-- Team ID: `APIBP23N` (must equal the repository name and `team.json.team_id`)
+- Team ID: `APIBP023` (must equal the repository name and `team.json.team_id`)
 - Chosen Approach: `A` — REST-First + GraphQL Layer
 
 ---
@@ -16,8 +16,8 @@ Course: API Design & Best Practices | Section: CS-401 | Instructor: TBD
 ## Quick start
 
 ```bash
-git clone https://github.com/<course-org>/APIBP23N
-cd APIBP23N
+git clone https://github.com/<course-org>/APIBP023
+cd APIBP023
 docker compose up
 # Server ready at http://localhost:8080 within 120 seconds
 # REST docs:    http://localhost:8080/docs
