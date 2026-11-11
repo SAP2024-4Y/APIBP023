@@ -8,7 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from strawberry.fastapi import GraphQLRouter
 from strawberry.types import Info
 
-from ..auth import _bearer, _decode
+from fastapi import Request
+from sqlalchemy import select
+
+from ..auth import _decode
 from ..database import async_session_maker, get_db
 from ..models import User
 from .loaders import build_loaders
@@ -40,8 +43,17 @@ from .types import (
 # Context factory — provides DB session + DataLoaders + optional current user
 # ---------------------------------------------------------------------------
 
-async def get_context(db: AsyncSession = Depends(get_db)):
-    return {"db": db, "loaders": build_loaders(db), "user": None}
+async def get_context(request: Request, db: AsyncSession = Depends(get_db)):
+    user = None
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        try:
+            payload = _decode(auth[7:])
+            result = await db.execute(select(User).where(User.id == payload.get("sub")))
+            user = result.scalar_one_or_none()
+        except Exception:
+            pass
+    return {"db": db, "loaders": build_loaders(db), "user": user}
 
 
 # ---------------------------------------------------------------------------

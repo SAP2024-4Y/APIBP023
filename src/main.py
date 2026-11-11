@@ -60,7 +60,7 @@ for router in (auth.router, exams.router, centers.router, slots.router, registra
     app.include_router(router, prefix="/api/v1")
 
 # ── GraphQL ───────────────────────────────────────────────────────────────────
-graphql_router = GraphQLRouter(schema, context_getter=get_context, graphiql=True)
+graphql_router = GraphQLRouter(schema, context_getter=get_context)
 app.include_router(graphql_router, prefix="/graphql")
 
 
