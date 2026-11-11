@@ -1,0 +1,36 @@
+meta {
+  name: Submit Answers
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{base_url}}/api/v1/submissions/{{reg_id}}
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{student_token}}
+}
+
+body:json {
+  {
+    "answers": [
+      { "question_id": "{{q1_id}}", "answer": "B" },
+      { "question_id": "{{q2_id}}", "answer": "42" }
+    ]
+  }
+}
+
+script:post-response {
+  bru.setVar("script_id", res.body.id);
+  bru.setEnvVar("script_id", res.body.id);
+}
+
+assert {
+  res.status: eq 200
+  res.body.id: isDefined
+  res.body.evaluated: eq false
+  res.body.answer_count: eq 2
+}
