@@ -1,0 +1,16 @@
+meta {
+  name: Nearby Exam Centers
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{base_url}}/api/v1/exam-centers/nearby?latitude=28.6139&longitude=77.2090&radius_km=50
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.data: isDefined
+}

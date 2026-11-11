@@ -1,0 +1,21 @@
+meta {
+  name: Get Submission Status
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/api/v1/submissions/{{reg_id}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{student_token}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.evaluated: eq false
+  res.body.answer_count: eq 2
+}
