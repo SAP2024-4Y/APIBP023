@@ -12,10 +12,10 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from sqlalchemy import and_, or_, select, func
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth import get_current_user, require_roles
+from ..auth import require_roles
 from ..database import get_db
 from ..middleware.rate_limit import limiter
 from ..models import Exam, User
