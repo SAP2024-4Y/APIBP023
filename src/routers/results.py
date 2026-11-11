@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import get_current_user, require_roles
 from ..database import get_db
 from ..middleware.rate_limit import limiter
-from ..models import AnswerScript, Exam, ExamSlot, Question, Registration, StudentAnswer, User
+from ..models import Exam, ExamSlot, Question, Registration, StudentAnswer, User
 
 router = APIRouter(prefix="/results", tags=["results"])
 
