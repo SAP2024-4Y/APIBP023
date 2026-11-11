@@ -1,0 +1,16 @@
+meta {
+  name: Get Single Slot
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{base_url}}/api/v1/exam-slots/slot-001
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.id: eq slot-001
+}

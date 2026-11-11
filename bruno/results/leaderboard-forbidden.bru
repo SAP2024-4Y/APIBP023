@@ -1,0 +1,19 @@
+meta {
+  name: Leaderboard Blocked for Student
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{base_url}}/api/v1/results/exams/exam-001
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{student_token}}
+}
+
+assert {
+  res.status: eq 403
+}

@@ -1,0 +1,21 @@
+meta {
+  name: List Exam Slots
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{base_url}}/api/v1/exam-slots
+  body: none
+  auth: none
+}
+
+params:query {
+  starts_at: 2027-01-01T00:00:00Z
+  ends_at: 2027-06-30T23:59:59Z
+}
+
+assert {
+  res.status: eq 200
+  res.body.data: isDefined
+}

@@ -1,0 +1,25 @@
+meta {
+  name: List Exams Filtered
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/api/v1/exams
+  body: none
+  auth: none
+}
+
+params:query {
+  category: Mathematics
+  min_price: 0
+  max_price: 500
+  sort: fee
+  order: asc
+  limit: 3
+}
+
+assert {
+  res.status: eq 200
+  res.body.data: isDefined
+}
