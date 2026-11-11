@@ -17,7 +17,7 @@ Course: S1-26_SESAPZG504 — API Design & Best Practices | Section: CS-401 | Ins
 ## Quick start
 
 ```bash
-git clone https://github.com/<course-org>/APIBP023
+git clone https://github.com/SAP2024-4Y/APIBP023
 cd APIBP023
 docker compose up
 # Server ready at http://localhost:8080 within ~30 s
