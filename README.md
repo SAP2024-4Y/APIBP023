@@ -1,12 +1,13 @@
 # APIBP023 — Exam Evaluation & Scheduling System
 
-Course: API Design & Best Practices | Section: CS-401 | Instructor: TBD
+Course: S1-26_SESAPZG504 — API Design & Best Practices | Section: CS-401 | Instructor: Vinaya Sathyanarayana
 
 ## Team Details
 
-| # | Name        | Roll No     | GitHub ID | Email               |
-|---|-------------|-------------|-----------|---------------------|
-| 1 | Baibhab Dey | 2024sl70019 | Baibhab23 | baibhabd17@gmail.com |
+| # | Name        | Roll No      | GitHub ID  | Email                                    |
+|---|-------------|--------------|------------|------------------------------------------|
+| 1 | Baibhab Dey | 2024sl70019  | Baibhab23  | 2024sl70019@wilp.bits-pilani.ac.in       |
+
 
 - Team ID: `APIBP023`
 - Chosen Approach: `A` — REST-First + GraphQL Layer
