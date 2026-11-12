@@ -1,14 +1,3 @@
-"""
-Integration tests for src/routers/slots.py and src/routers/registrations.py — Calendar API.
-
-Covers:
-  - GET  /api/v1/exam-slots                 — list by time window
-  - GET  /api/v1/exam-slots/{id}            — single slot
-  - POST /api/v1/exam-slots/{id}/register   — register (auth required)
-  - 409  on slot conflict
-  - DELETE /api/v1/exam-slots/{id}/register — cancel registration
-  - GET  /api/v1/registrations              — student's own registrations
-"""
 import pytest
 from httpx import AsyncClient
 

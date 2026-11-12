@@ -1,14 +1,3 @@
-"""
-Integration tests covering the runtime contract required by the evaluator:
-  - /health → 200 {"status": "ok"}
-  - POST /api/v1/auth/token → token
-  - GET /api/v1/exams — List API with filtering/pagination
-  - GET /api/v1/exam-centers/nearby — Map API proximity
-  - GET /api/v1/exam-centers/bbox — Map API bounding box
-  - GET /api/v1/exam-slots — Calendar API time-window
-  - POST /api/v1/exam-slots/{id}/register — booking + 409 conflict
-  - 401 on protected endpoint without token
-"""
 import pytest
 from httpx import AsyncClient
 
@@ -201,7 +190,7 @@ async def test_graphql_list_exams(client: AsyncClient):
 async def test_graphql_nearby_centers(client: AsyncClient):
     query = """
     query {
-      nearbyExamCenters(latitude: 28.6139, longitude: 77.2090, radius_km: 50) {
+      nearbyExamCenters(latitude: 28.6139, longitude: 77.2090, radiusKm: 50) {
         id name distanceKm coordinates { longitude latitude }
       }
     }
