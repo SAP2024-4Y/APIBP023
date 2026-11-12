@@ -20,8 +20,8 @@ def _id() -> str:
     return str(uuid.uuid4())
 
 
-def _dt(year: int, month: int, day: int, hour: int = 9) -> datetime:
-    return datetime(year, month, day, hour, 0, 0, tzinfo=timezone.utc)
+def _dt(year: int, month: int, day: int, hour: int = 9, minute: int = 0) -> datetime:
+    return datetime(year, month, day, hour, minute, 0, tzinfo=timezone.utc)
 
 
 # ---------------------------------------------------------------------------
