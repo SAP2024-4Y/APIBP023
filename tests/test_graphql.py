@@ -1,15 +1,3 @@
-"""
-Integration tests for the GraphQL API (src/graphql_api/).
-
-Covers:
-  - POST /graphql — ListExams query
-  - POST /graphql — single Exam query
-  - POST /graphql — nearbyExamCenters query
-  - POST /graphql — examSlots query
-  - POST /graphql — myRegistrations (authenticated)
-  - POST /graphql — authenticate mutation
-  - Schema introspection
-"""
 import pytest
 from httpx import AsyncClient
 
