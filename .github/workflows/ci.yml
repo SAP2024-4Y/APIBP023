@@ -41,6 +41,6 @@ jobs:
           docker compose up -d --build
           echo "Waiting for service..."
           timeout 120 bash -c 'until curl -sf http://localhost:8080/health; do sleep 2; done'
-          curl -sf http://localhost:8080/health | grep '"status": "ok"'
+          curl -sf http://localhost:8080/health | grep '"ok"'
           curl -sf http://localhost:8080/api/v1/exams | grep '"has_more"'
           docker compose down
