@@ -5,7 +5,6 @@ from datetime import datetime
 from math import asin, cos, radians, sin, sqrt
 from typing import List, Optional
 
-import strawberry
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -138,9 +137,6 @@ async def resolve_exams(
 
     # total count (without cursor/limit)
     count_q = select(Exam)
-    base_conds = [c for c in conditions if not (
-        hasattr(c, "left") and str(c.left) in ("exams.created_at", "exams.id")
-    )]
     total = len((await db.execute(count_q)).scalars().all())
 
     return ExamConnection(

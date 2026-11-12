@@ -6,7 +6,7 @@ GET  /api/v1/exam-slots/{id}             – single slot
 POST /api/v1/exam-slots/{id}/register    – book a slot (auth required; 409 on conflict)
 DELETE /api/v1/exam-slots/{id}/register  – cancel own registration (auth required)
 """
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import get_current_user
 from ..database import get_db
 from ..middleware.rate_limit import limiter
-from ..models import Exam, ExamCenter, ExamSlot, Registration, User
+from ..models import Exam, ExamSlot, Registration, User
 
 router = APIRouter(prefix="/exam-slots", tags=["exam-slots"])
 

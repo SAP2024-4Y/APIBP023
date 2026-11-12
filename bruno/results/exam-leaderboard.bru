@@ -1,0 +1,21 @@
+meta {
+  name: Exam Leaderboard
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{base_url}}/api/v1/results/exams/exam-001
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{admin_token}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.count: eq 1
+  res.body.data[0].rank: eq 1
+}

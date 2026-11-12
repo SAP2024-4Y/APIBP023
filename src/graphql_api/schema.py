@@ -3,16 +3,13 @@ from datetime import datetime
 from typing import List, Optional
 
 import strawberry
-from fastapi import Depends
+from fastapi import Depends, Request
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from strawberry.fastapi import GraphQLRouter
 from strawberry.types import Info
 
-from fastapi import Request
-from sqlalchemy import select
-
 from ..auth import _decode
-from ..database import async_session_maker, get_db
+from ..database import get_db
 from ..models import User
 from .loaders import build_loaders
 from .mutations import (
