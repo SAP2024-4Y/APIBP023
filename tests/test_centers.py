@@ -1,13 +1,3 @@
-"""
-Integration tests for src/routers/centers.py — Map API.
-
-Covers:
-  - GET /api/v1/exam-centers           — list all centers
-  - GET /api/v1/exam-centers/nearby    — proximity search
-  - GET /api/v1/exam-centers/bbox      — bounding-box search
-  - GET /api/v1/exam-centers/{id}      — single center
-  - Haversine helper (pure function)
-"""
 import pytest
 from httpx import AsyncClient
 
