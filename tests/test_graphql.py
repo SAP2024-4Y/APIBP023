@@ -6,7 +6,7 @@ pytestmark = pytest.mark.asyncio
 GQL = "/graphql"
 
 
-def gql_payload(query: str, variables: dict = None):
+def gql_payload(query: str, variables: dict | None = None):
     return {"query": query, "variables": variables or {}}
 
 

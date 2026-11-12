@@ -1,14 +1,13 @@
-import asyncio
 import os
-import pytest
+
 import pytest_asyncio
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./data/test_exam_eval.db")
 os.environ.setdefault("SECRET_KEY", "test-secret-key")
 
-from src.main import app
 from src.database import Base, engine
+from src.main import app
 
 
 @pytest_asyncio.fixture(scope="session")

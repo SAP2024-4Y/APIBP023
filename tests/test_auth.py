@@ -1,11 +1,3 @@
-"""
-Unit and integration tests for src/auth.py and src/routers/auth.py.
-
-Covers:
-  - POST /api/v1/auth/token  — success, wrong password, unknown user
-  - JWT creation helpers (hash_password / verify_password / create_access_token)
-  - get_current_user dependency — missing token, invalid token
-"""
 import pytest
 from httpx import AsyncClient
 
@@ -93,7 +85,9 @@ class TestAuthHelpers:
         assert len(parts) == 3   # header.payload.signature
 
     def test_create_access_token_encodes_role(self):
-        import base64, json
+        import base64
+        import json
+
         from src.auth import create_access_token
         token = create_access_token("user-abc", "admin")
         payload_b64 = token.split(".")[1]

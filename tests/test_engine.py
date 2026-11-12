@@ -1,8 +1,8 @@
 import json
-import pytest
+
 from src.engine import (
-    PolicyConfig,
     EvaluationResult,
+    PolicyConfig,
     QuestionResult,
     assign_grade,
     evaluate_script,
@@ -40,7 +40,7 @@ class TestMCQScoring:
         assert verdict == "unattempted"
 
     def test_whitespace_stripped(self):
-        marks, verdict = score_question("mcq", " A ", " A ", DEFAULT_POLICY)
+        _marks, verdict = score_question("mcq", " A ", " A ", DEFAULT_POLICY)
         assert verdict == "correct"
 
 
@@ -105,13 +105,13 @@ class TestDescriptiveScoring:
     def test_no_keywords_matched_is_unattempted(self):
         correct = self._kw("mitochondria", "ATP")
         student = "The sky is blue."
-        marks, verdict = score_question("descriptive", student, correct, DEFAULT_POLICY)
+        _marks, verdict = score_question("descriptive", student, correct, DEFAULT_POLICY)
         assert verdict == "unattempted"
 
     def test_invalid_json_falls_back_to_literal(self):
         correct = "photosynthesis"
         student = "photosynthesis is the process"
-        marks, verdict = score_question("descriptive", student, correct, DEFAULT_POLICY)
+        _marks, verdict = score_question("descriptive", student, correct, DEFAULT_POLICY)
         assert verdict == "correct"
 
 

@@ -1,4 +1,3 @@
-import pytest
 import pytest_asyncio
 from httpx import AsyncClient
 
@@ -12,6 +11,7 @@ async def eval_setup(client: AsyncClient, token: str, admin_token: str) -> dict:
     assert reg_resp.status_code in (201, 409)
     if reg_resp.status_code == 409:
         from sqlalchemy import select
+
         from src.database import async_session_maker
         from src.models import Registration
         async with async_session_maker() as db:
