@@ -1,0 +1,22 @@
+meta {
+  name: My Results
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/api/v1/results/me
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{student_token}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.count: eq 1
+  res.body.data[0].grade: isDefined
+  res.body.data[0].score: isDefined
+}

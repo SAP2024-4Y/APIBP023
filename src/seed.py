@@ -1,11 +1,9 @@
 """Seed the database with sample data on first run."""
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 from passlib.context import CryptContext
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from .database import async_session_maker
 from .models import User, ExamCenter, Exam, ExamSlot
 
