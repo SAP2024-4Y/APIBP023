@@ -1,0 +1,34 @@
+meta {
+  name: Add Integer Question
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{base_url}}/api/v1/evaluation/exams/exam-001/questions
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{admin_token}}
+}
+
+body:json {
+  {
+    "number": 2,
+    "text": "What is 6 × 7?",
+    "question_type": "integer"
+  }
+}
+
+script:post-response {
+  bru.setVar("q2_id", res.body.id);
+  bru.setEnvVar("q2_id", res.body.id);
+}
+
+assert {
+  res.status: eq 201
+  res.body.id: isDefined
+  res.body.question_type: eq integer
+}
