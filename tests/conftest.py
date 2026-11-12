@@ -29,3 +29,13 @@ async def token(client: AsyncClient) -> str:
     )
     assert resp.status_code == 200
     return resp.json()["token"]
+
+
+@pytest_asyncio.fixture(scope="session")
+async def admin_token(client: AsyncClient) -> str:
+    resp = await client.post(
+        "/api/v1/auth/token",
+        json={"username": "admin", "password": "admin-password"},
+    )
+    assert resp.status_code == 200
+    return resp.json()["token"]
