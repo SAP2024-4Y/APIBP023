@@ -1,15 +1,3 @@
-"""
-Integration tests for src/routers/exams.py — List API.
-
-Covers:
-  - GET /api/v1/exams             — no filter, returns paginated list
-  - GET /api/v1/exams?category=   — category filter
-  - GET /api/v1/exams?status=     — status filter
-  - GET /api/v1/exams?min_price=  — price range filter
-  - GET /api/v1/exams?sort=&order=— sorting
-  - GET /api/v1/exams?limit=      — page size
-  - GET /api/v1/exams?after=      — cursor pagination
-"""
 import pytest
 from httpx import AsyncClient
 
