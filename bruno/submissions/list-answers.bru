@@ -1,0 +1,20 @@
+meta {
+  name: List Submission Answers
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{base_url}}/api/v1/submissions/{{reg_id}}/answers
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{student_token}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.count: eq 2
+}

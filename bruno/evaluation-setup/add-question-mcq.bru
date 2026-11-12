@@ -1,0 +1,35 @@
+meta {
+  name: Add MCQ Question
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{base_url}}/api/v1/evaluation/exams/exam-001/questions
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{admin_token}}
+}
+
+body:json {
+  {
+    "number": 1,
+    "text": "Which value is closest to π?",
+    "question_type": "mcq",
+    "options": ["3.12", "3.14", "3.16", "3.18"]
+  }
+}
+
+script:post-response {
+  bru.setVar("q1_id", res.body.id);
+  bru.setEnvVar("q1_id", res.body.id);
+}
+
+assert {
+  res.status: eq 201
+  res.body.id: isDefined
+  res.body.question_type: eq mcq
+}

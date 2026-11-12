@@ -23,7 +23,6 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import get_current_user, require_roles
 from ..database import get_db
@@ -251,7 +250,7 @@ async def set_answer_key(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_roles("instructor", "admin")),
 ) -> dict:
-    q = await _get_question_or_404(q_id, db)
+    await _get_question_or_404(q_id, db)
 
     existing = (await db.execute(select(AnswerKey).where(AnswerKey.question_id == q_id))).scalar_one_or_none()
     if existing:

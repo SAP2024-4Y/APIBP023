@@ -1,0 +1,29 @@
+meta {
+  name: Cancel Registration
+  type: http
+  seq: 2
+}
+
+delete {
+  url: {{base_url}}/api/v1/exam-slots/slot-003/register
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{student_token}}
+}
+
+script:pre-request {
+  // Register slot-003 first so we have something to cancel
+  const axios = require("axios");
+  const resp = await axios.post(
+    `${bru.getEnvVar("base_url")}/api/v1/exam-slots/slot-003/register`,
+    {},
+    { headers: { Authorization: `Bearer ${bru.getEnvVar("student_token")}` } }
+  );
+}
+
+assert {
+  res.status: eq 200
+}

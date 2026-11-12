@@ -1,0 +1,21 @@
+meta {
+  name: List Exams
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/api/v1/exams
+  body: none
+  auth: none
+}
+
+params:query {
+  limit: 5
+}
+
+assert {
+  res.status: eq 200
+  res.body.data: isDefined
+  res.body.has_more: isDefined
+}
