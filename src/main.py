@@ -1,13 +1,3 @@
-"""
-Application entry point.
-
-Startup sequence:
-  1. Create all SQLAlchemy tables
-  2. Run seed (no-op if data exists)
-  3. Mount REST routers under /api/v1/
-  4. Mount GraphQL at /graphql
-  5. Expose /health and /docs
-"""
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -19,6 +9,9 @@ from .database import Base, engine
 from .graphql_api.schema import get_context, schema
 from .middleware.rate_limit import limiter, rate_limit_exceeded_handler
 from .routers import auth, centers, exams, registrations, slots
+from .routers.evaluation import router as evaluation_router
+from .routers.submissions import router as submissions_router
+from .routers.results import router as results_router
 from .seed import run_seed
 
 
@@ -58,9 +51,12 @@ app.add_middleware(
 # ── REST routes ───────────────────────────────────────────────────────────────
 for router in (auth.router, exams.router, centers.router, slots.router, registrations.router):
     app.include_router(router, prefix="/api/v1")
+app.include_router(evaluation_router, prefix="/api/v1")
+app.include_router(submissions_router, prefix="/api/v1")
+app.include_router(results_router, prefix="/api/v1")
 
 # ── GraphQL ───────────────────────────────────────────────────────────────────
-graphql_router = GraphQLRouter(schema, context_getter=get_context, graphiql=True)
+graphql_router = GraphQLRouter(schema, context_getter=get_context)
 app.include_router(graphql_router, prefix="/graphql")
 
 

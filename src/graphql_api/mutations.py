@@ -1,6 +1,4 @@
 """GraphQL mutations (state-changing operations)."""
-from typing import Optional
-
 import strawberry
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
