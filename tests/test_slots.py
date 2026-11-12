@@ -70,7 +70,7 @@ class TestRegistration:
 
     async def test_double_register_same_slot_is_409(self, client: AsyncClient, token: str):
         headers = {"Authorization": f"Bearer {token}"}
-        r1 = await client.post("/api/v1/exam-slots/slot-001/register", headers=headers)
+        await client.post("/api/v1/exam-slots/slot-001/register", headers=headers)
         r2 = await client.post("/api/v1/exam-slots/slot-001/register", headers=headers)
         # At least the second call must be 409
         assert r2.status_code == 409

@@ -1,3 +1,14 @@
+"""
+Integration tests covering the runtime contract required by the evaluator:
+  - /health → 200 {"status": "ok"}
+  - POST /api/v1/auth/token → token
+  - GET /api/v1/exams — List API with filtering/pagination
+  - GET /api/v1/exam-centers/nearby — Map API proximity
+  - GET /api/v1/exam-centers/bbox — Map API bounding box
+  - GET /api/v1/exam-slots — Calendar API time-window
+  - POST /api/v1/exam-slots/{id}/register — booking + 409 conflict
+  - 401 on protected endpoint without token
+"""
 import pytest
 from httpx import AsyncClient
 
@@ -77,11 +88,12 @@ async def test_list_exams_cursor_pagination(client: AsyncClient):
     body1 = r1.json()
     assert body1["has_more"] is True
     cursor = body1["next_cursor"]
-    assert isinstance(cursor, str)
+    assert cursor is not None
 
     r2 = await client.get(f"/api/v1/exams?limit=5&after={cursor}")
     body2 = r2.json()
     assert isinstance(body2["data"], list)
+    assert isinstance(cursor, str) and len(cursor) > 0
 
 
 async def test_get_exam_not_found(client: AsyncClient):
