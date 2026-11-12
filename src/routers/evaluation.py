@@ -1,5 +1,5 @@
 """
-Answer-key management API — questions, answer keys, and marking policies.
+Answer-key management API — questions, answer keys, marking policies, and evaluation trigger.
 
 All write endpoints require instructor or admin role.
 
@@ -26,8 +26,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import get_current_user, require_roles
 from ..database import get_db
+from ..engine import PolicyConfig, evaluate_script
 from ..middleware.rate_limit import limiter
-from ..models import AnswerKey, Exam, MarkingPolicy, Question, User
+from ..models import AnswerKey, AnswerScript, Exam, MarkingPolicy, Question, Registration, StudentAnswer, User
 
 router = APIRouter(prefix="/evaluation", tags=["evaluation"])
 
@@ -249,7 +250,7 @@ async def set_answer_key(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_roles("instructor", "admin")),
 ) -> dict:
-    q = await _get_question_or_404(q_id, db)
+    await _get_question_or_404(q_id, db)
 
     existing = (await db.execute(select(AnswerKey).where(AnswerKey.question_id == q_id))).scalar_one_or_none()
     if existing:
@@ -344,3 +345,109 @@ async def update_marking_policy(
     await db.commit()
     await db.refresh(mp)
     return _mp_out(mp)
+
+
+# ---------------------------------------------------------------------------
+# Evaluate — trigger scoring for a single answer script
+# ---------------------------------------------------------------------------
+
+@router.post("/scripts/{script_id}/evaluate", summary="Score an answer script and store the result")
+@limiter.limit("30/minute")
+async def evaluate(
+    request: Request,
+    script_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles("instructor", "admin")),
+) -> dict:
+    # Load the script with its registration
+    script = (await db.execute(
+        select(AnswerScript)
+        .where(AnswerScript.id == script_id)
+        .options(selectinload(AnswerScript.registration))
+    )).scalar_one_or_none()
+    if not script:
+        raise HTTPException(status.HTTP_404_NOT_FOUND,
+                            detail={"code": "SCRIPT_NOT_FOUND", "message": f"Script '{script_id}' not found"})
+    if script.evaluated:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            detail={"code": "ALREADY_EVALUATED", "message": "Script has already been evaluated"})
+
+    reg: Registration = script.registration
+
+    # Get exam via slot
+    from ..models import ExamSlot
+    slot = (await db.execute(select(ExamSlot).where(ExamSlot.id == reg.slot_id))).scalar_one_or_none()
+    exam = (await db.execute(select(Exam).where(Exam.id == slot.exam_id))).scalar_one_or_none()
+
+    # Marking policy — required
+    policy_row = (await db.execute(select(MarkingPolicy).where(MarkingPolicy.exam_id == exam.id))).scalar_one_or_none()
+    if not policy_row:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail={"code": "POLICY_NOT_FOUND", "message": "No marking policy set for this exam"})
+
+    # Load questions with their answer keys
+    questions = (await db.execute(
+        select(Question)
+        .where(Question.exam_id == exam.id)
+        .options(selectinload(Question.answer_key))
+        .order_by(Question.number)
+    )).scalars().all()
+
+    # Load student answers
+    student_rows = (await db.execute(
+        select(StudentAnswer).where(StudentAnswer.script_id == script_id)
+    )).scalars().all()
+    student_map = {sa.question_id: sa.answer for sa in student_rows}
+
+    # Build question dicts for engine
+    q_dicts = [
+        {
+            "id": q.id,
+            "number": q.number,
+            "question_type": q.question_type,
+            "answer_key_correct_answer": q.answer_key.correct_answer if q.answer_key else None,
+        }
+        for q in questions
+    ]
+
+    policy = PolicyConfig(
+        marks_correct=policy_row.marks_correct,
+        marks_wrong=policy_row.marks_wrong,
+        marks_unattempted=policy_row.marks_unattempted,
+        partial_credit_threshold=policy_row.partial_credit_threshold,
+        partial_credit_ratio=policy_row.partial_credit_ratio,
+    )
+
+    result = evaluate_script(q_dicts, student_map, policy, exam.total_marks, exam.passing_marks)
+
+    # Persist results
+    from datetime import datetime, timezone
+    script.evaluated = True
+    script.evaluated_at = datetime.now(timezone.utc)
+
+    reg.score = result.total_score
+    reg.grade = result.grade
+    reg.status = "completed"
+
+    await db.commit()
+
+    return {
+        "script_id": script_id,
+        "registration_id": reg.id,
+        "total_score": result.total_score,
+        "max_score": result.max_score,
+        "percentage": result.percentage,
+        "grade": result.grade,
+        "question_results": [
+            {
+                "question_id": qr.question_id,
+                "question_number": qr.question_number,
+                "question_type": qr.question_type,
+                "student_answer": qr.student_answer,
+                "correct_answer": qr.correct_answer,
+                "marks_awarded": qr.marks_awarded,
+                "verdict": qr.verdict,
+            }
+            for qr in result.question_results
+        ],
+    }
