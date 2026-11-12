@@ -1,0 +1,27 @@
+meta {
+  name: Set Answer Key for Integer
+  type: http
+  seq: 5
+}
+
+put {
+  url: {{base_url}}/api/v1/evaluation/questions/{{q2_id}}/answer-key
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{admin_token}}
+}
+
+body:json {
+  {
+    "correct_answer": "42",
+    "explanation": "6 × 7 = 42"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.correct_answer: eq "42"
+}

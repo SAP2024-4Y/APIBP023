@@ -16,7 +16,6 @@ async def client():
         await conn.run_sync(Base.metadata.create_all)
     from src.seed import run_seed
     await run_seed()
-
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
 

@@ -1,0 +1,30 @@
+meta {
+  name: Create Marking Policy
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{base_url}}/api/v1/evaluation/exams/exam-001/marking-policy
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{admin_token}}
+}
+
+body:json {
+  {
+    "marks_correct": 4.0,
+    "marks_wrong": -1.0,
+    "marks_unattempted": 0.0,
+    "partial_credit_threshold": 0.5,
+    "partial_credit_ratio": 0.5
+  }
+}
+
+assert {
+  res.status: eq 201
+  res.body.marks_correct: eq 4
+}

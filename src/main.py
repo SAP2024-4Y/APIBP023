@@ -1,13 +1,3 @@
-"""
-Application entry point.
-
-Startup sequence:
-  1. Create all SQLAlchemy tables
-  2. Run seed (no-op if data exists)
-  3. Mount REST routers under /api/v1/
-  4. Mount GraphQL at /graphql
-  5. Expose /health and /docs
-"""
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
