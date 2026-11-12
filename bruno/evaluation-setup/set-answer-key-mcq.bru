@@ -1,0 +1,27 @@
+meta {
+  name: Set Answer Key for MCQ
+  type: http
+  seq: 4
+}
+
+put {
+  url: {{base_url}}/api/v1/evaluation/questions/{{q1_id}}/answer-key
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{admin_token}}
+}
+
+body:json {
+  {
+    "correct_answer": "B",
+    "explanation": "π ≈ 3.14, which is option B"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.correct_answer: eq B
+}
