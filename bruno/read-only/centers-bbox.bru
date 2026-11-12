@@ -1,0 +1,16 @@
+meta {
+  name: Exam Centers Bounding Box
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{base_url}}/api/v1/exam-centers/bbox?min_lat=28.4&min_lon=77.0&max_lat=28.8&max_lon=77.5
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.data: isDefined
+}
