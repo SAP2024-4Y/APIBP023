@@ -15,13 +15,15 @@ auth:bearer {
 }
 
 script:pre-request {
-  // Register slot-003 first so we have something to cancel
+  // Register slot-003 first so we have something to cancel (ignore 409 if already registered)
   const axios = require("axios");
-  const resp = await axios.post(
-    `${bru.getEnvVar("base_url")}/api/v1/exam-slots/slot-003/register`,
-    {},
-    { headers: { Authorization: `Bearer ${bru.getEnvVar("student_token")}` } }
-  );
+  try {
+    await axios.post(
+      `${bru.getEnvVar("base_url")}/api/v1/exam-slots/slot-003/register`,
+      {},
+      { headers: { Authorization: `Bearer ${bru.getEnvVar("student_token")}` } }
+    );
+  } catch (e) {}
 }
 
 assert {
