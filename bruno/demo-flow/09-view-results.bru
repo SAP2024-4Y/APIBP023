@@ -1,0 +1,21 @@
+meta {
+  name: 09 - View Results
+  type: http
+  seq: 9
+}
+
+get {
+  url: {{base_url}}/api/v1/results/registrations/{{demo_reg_id}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{student_token}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.score: isDefined
+  res.body.grade: isDefined
+}
