@@ -4,8 +4,8 @@ Registrations — view and manage your exam registrations.
 GET  /api/v1/registrations        – list own registrations (auth required)
 GET  /api/v1/registrations/{id}   – get single registration (auth required)
 """
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import get_current_user
@@ -32,17 +32,23 @@ def _reg_out(r: Registration) -> dict:
 @limiter.limit("100/minute")
 async def list_my_registrations(
     request: Request,
+    limit: int = Query(50, ge=1, le=200, description="Max results to return"),
+    offset: int = Query(0, ge=0, description="Number of results to skip"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    total = (await db.execute(
+        select(func.count()).select_from(Registration).where(Registration.student_id == current_user.id)
+    )).scalar_one()
     rows = (
         await db.execute(
             select(Registration)
             .where(Registration.student_id == current_user.id)
             .order_by(Registration.registered_at.desc())
+            .limit(limit).offset(offset)
         )
     ).scalars().all()
-    return {"data": [_reg_out(r) for r in rows], "count": len(rows)}
+    return {"data": [_reg_out(r) for r in rows], "count": len(rows), "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/{reg_id}", summary="Get a single registration")

@@ -5,8 +5,8 @@ GET /api/v1/results/me                      – student: own evaluated registrat
 GET /api/v1/results/registrations/{reg_id}  – student or admin: detailed result for one registration
 GET /api/v1/results/exams/{exam_id}         – admin/instructor: all results for an exam (leaderboard)
 """
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -147,6 +147,8 @@ def _leaderboard_entry(reg: Registration, rank: int, is_admin: bool) -> dict:
 async def exam_results(
     request: Request,
     exam_id: str,
+    limit: int = Query(50, ge=1, le=200, description="Max results to return"),
+    offset: int = Query(0, ge=0, description="Number of results to skip"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_roles("instructor", "admin")),
 ) -> dict:
@@ -159,19 +161,28 @@ async def exam_results(
         s.id for s in (await db.execute(select(ExamSlot).where(ExamSlot.exam_id == exam_id))).scalars().all()
     ]
     if not slot_ids:
-        return {"exam_id": exam_id, "data": [], "count": 0}
+        return {"exam_id": exam_id, "data": [], "count": 0, "total": 0, "limit": limit, "offset": offset}
+
+    base_where = [Registration.slot_id.in_(slot_ids), Registration.status == "completed"]
+    total = (await db.execute(
+        select(func.count()).select_from(Registration).where(*base_where)
+    )).scalar_one()
 
     regs = (await db.execute(
         select(Registration)
-        .where(Registration.slot_id.in_(slot_ids), Registration.status == "completed")
+        .where(*base_where)
         .options(selectinload(Registration.student))
         .order_by(Registration.score.desc())
+        .limit(limit).offset(offset)
     )).scalars().all()
 
     is_admin = current_user.role == "admin"
     return {
         "exam_id": exam_id,
         "exam_title": exam.title,
-        "data": [_leaderboard_entry(r, i + 1, is_admin) for i, r in enumerate(regs)],
+        "data": [_leaderboard_entry(r, offset + i + 1, is_admin) for i, r in enumerate(regs)],
         "count": len(regs),
+        "total": total,
+        "limit": limit,
+        "offset": offset,
     }
