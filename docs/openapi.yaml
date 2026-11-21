@@ -343,7 +343,7 @@ components:
             - `ongoing` — exam is currently in progress
             - `completed` — exam is over, results may be available
             - `cancelled` — exam has been cancelled, no registrations allowed
-          enum: [scheduled, ongoing, completed, cancelled]
+          enum: [draft, published, scheduled, ongoing, completed, cancelled]
           example: scheduled
         created_at:
           type: string
@@ -1251,7 +1251,7 @@ paths:
             - `cancelled` — exam cancelled
           schema:
             type: string
-            enum: [scheduled, ongoing, completed, cancelled]
+            enum: [draft, published, scheduled, ongoing, completed, cancelled]
           example: scheduled
         - name: category
           in: query
@@ -1537,6 +1537,85 @@ paths:
                 detail:
                   code: EXAM_NOT_FOUND
                   message: Exam 'exam-999' not found
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+
+    patch:
+      tags: [exams]
+      summary: Update an exam
+      description: |
+        **Requires login as `instructor` or `admin`.**
+
+        Update any fields of an existing exam. All fields are optional — only send the fields
+        you want to change. Cross-field validation still applies: passing_marks cannot exceed
+        total_marks after the update.
+
+        **Rate limit:** 30 requests per minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: exam_id
+          in: path
+          required: true
+          schema: { type: string }
+          example: exam-001
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string }
+                subject: { type: string }
+                description: { type: string }
+                total_marks: { type: number, minimum: 0.1 }
+                passing_marks: { type: number, minimum: 0.1 }
+                duration_minutes: { type: integer, minimum: 1 }
+                fee: { type: number, minimum: 0 }
+                status:
+                  type: string
+                  enum: [draft, published, scheduled, ongoing, completed, cancelled]
+            examples:
+              cancel_exam:
+                summary: Cancel an exam
+                value: { status: cancelled }
+              update_fee:
+                summary: Change the registration fee
+                value: { fee: 400.0 }
+      responses:
+        "200":
+          description: Exam updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Exam" }
+              example:
+                id: exam-001
+                title: Class 12 Mathematics Board Exam
+                subject: Mathematics
+                duration_minutes: 180
+                total_marks: 100
+                passing_marks: 33
+                fee: 250.0
+                status: cancelled
+                created_at: "2026-01-01T00:00:00"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Exam not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              example: { detail: { code: EXAM_NOT_FOUND, message: "Exam exam-999 not found" } }
+        "422":
+          description: Validation error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              example: { detail: { code: MISSING_FIELDS, message: "passing_marks cannot exceed total_marks" } }
         "429":
           $ref: "#/components/responses/TooManyRequests"
 
