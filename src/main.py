@@ -1,5 +1,7 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
+import yaml
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi.errors import RateLimitExceeded
@@ -64,3 +66,15 @@ app.include_router(graphql_router, prefix="/graphql")
 @app.get("/health", tags=["ops"], summary="Health check")
 async def health():
     return {"status": "ok"}
+
+
+# ── Custom OpenAPI spec (load from docs/openapi.yaml instead of auto-generating) ──
+_SPEC_PATH = Path(__file__).parent.parent / "docs" / "openapi.yaml"
+
+
+def _load_openapi() -> dict:
+    with open(_SPEC_PATH) as f:
+        return yaml.safe_load(f)
+
+
+app.openapi = _load_openapi
