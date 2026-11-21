@@ -108,7 +108,7 @@ async def submit_answers(
         select(ExamSlot).where(ExamSlot.id == reg.slot_id)
     )).scalar_one_or_none()
     if not slot:
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR,
+        raise HTTPException(status.HTTP_404_NOT_FOUND,
                             detail={"code": "SLOT_NOT_FOUND", "message": "Slot not found"})
 
     valid_q_ids = {
