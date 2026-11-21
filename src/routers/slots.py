@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import get_current_user, require_roles
@@ -159,6 +159,8 @@ async def list_slots(
     ends_at: Optional[datetime] = Query(None, description="ISO 8601 UTC window end"),
     exam_id: Optional[str] = Query(None),
     center_id: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=200, description="Max results to return"),
+    offset: int = Query(0, ge=0, description="Number of results to skip"),
     db: AsyncSession = Depends(get_db),
 ):
     if starts_at and ends_at and starts_at >= ends_at:
@@ -177,13 +179,16 @@ async def list_slots(
     if center_id:
         conditions.append(ExamSlot.center_id == center_id)
 
+    count_q = select(func.count()).select_from(ExamSlot)
     q = select(ExamSlot)
     if conditions:
         q = q.where(and_(*conditions))
-    q = q.order_by(ExamSlot.starts_at.asc())
+        count_q = count_q.where(and_(*conditions))
 
+    total = (await db.execute(count_q)).scalar_one()
+    q = q.order_by(ExamSlot.starts_at.asc()).limit(limit).offset(offset)
     rows = (await db.execute(q)).scalars().all()
-    return {"data": [_slot_out(s) for s in rows], "count": len(rows)}
+    return {"data": [_slot_out(s) for s in rows], "count": len(rows), "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/{slot_id}", summary="Get a single exam slot")

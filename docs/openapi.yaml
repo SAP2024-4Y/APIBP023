@@ -2010,6 +2010,25 @@ paths:
             type: string
             format: date-time
           example: "2027-04-01T00:00:00"
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of slots to return (1–200). Defaults to 50.
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+          example: 50
+        - name: offset
+          in: query
+          required: false
+          description: Number of slots to skip for pagination. Defaults to 0.
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+          example: 0
       responses:
         "200":
           description: List of exam slots matching your filters
@@ -2024,6 +2043,16 @@ paths:
                       $ref: "#/components/schemas/ExamSlot"
                   count:
                     type: integer
+                    description: Number of items in this page
+                  total:
+                    type: integer
+                    description: Total number of matching slots (across all pages)
+                  limit:
+                    type: integer
+                    description: The limit value used for this response
+                  offset:
+                    type: integer
+                    description: The offset value used for this response
               example:
                 data:
                   - id: slot-001
@@ -2043,6 +2072,9 @@ paths:
                     available_seats: 50
                     created_at: "2026-01-01T00:00:00"
                 count: 2
+                total: 24
+                limit: 50
+                offset: 0
         "422":
           description: "`starts_at` must be before `ends_at` when both are given"
           content:
@@ -2272,6 +2304,26 @@ paths:
         **Rate limit:** 100 requests per minute.
       security:
         - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of registrations to return (1–200). Defaults to 50.
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+          example: 50
+        - name: offset
+          in: query
+          required: false
+          description: Number of registrations to skip for pagination. Defaults to 0.
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+          example: 0
       responses:
         "200":
           description: Your exam bookings
@@ -2286,6 +2338,14 @@ paths:
                       $ref: "#/components/schemas/Registration"
                   count:
                     type: integer
+                    description: Number of items in this page
+                  total:
+                    type: integer
+                    description: Total number of your registrations (across all pages)
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
               example:
                 data:
                   - id: a3f1c2d4-0001-0001-0001-000000000001
@@ -2296,6 +2356,9 @@ paths:
                     grade: null
                     registered_at: "2026-11-21T08:00:00"
                 count: 1
+                total: 1
+                limit: 50
+                offset: 0
         "401":
           $ref: "#/components/responses/Unauthorized"
         "429":
@@ -3608,6 +3671,25 @@ paths:
           schema:
             type: string
           example: exam-001
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of leaderboard entries to return (1–200). Defaults to 50.
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+          example: 50
+        - name: offset
+          in: query
+          required: false
+          description: Number of entries to skip for pagination. Rank numbers adjust accordingly (`offset + i + 1`).
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+          example: 0
       responses:
         "200":
           description: Leaderboard sorted by score, highest first
@@ -3628,7 +3710,14 @@ paths:
                       $ref: "#/components/schemas/LeaderboardEntry"
                   count:
                     type: integer
-                    description: Number of evaluated results
+                    description: Number of entries in this page
+                  total:
+                    type: integer
+                    description: Total number of evaluated results for this exam
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
               example:
                 exam_id: exam-001
                 exam_title: Class 12 Mathematics Board Exam
@@ -3646,6 +3735,9 @@ paths:
                     score: 72.0
                     grade: B
                 count: 2
+                total: 2
+                limit: 50
+                offset: 0
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
