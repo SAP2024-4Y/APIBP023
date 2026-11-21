@@ -377,7 +377,13 @@ async def evaluate(
     # Get exam via slot
     from ..models import ExamSlot
     slot = (await db.execute(select(ExamSlot).where(ExamSlot.id == reg.slot_id))).scalar_one_or_none()
+    if not slot:
+        raise HTTPException(status.HTTP_404_NOT_FOUND,
+                            detail={"code": "SLOT_NOT_FOUND", "message": f"Slot '{reg.slot_id}' not found"})
     exam = (await db.execute(select(Exam).where(Exam.id == slot.exam_id))).scalar_one_or_none()
+    if not exam:
+        raise HTTPException(status.HTTP_404_NOT_FOUND,
+                            detail={"code": "EXAM_NOT_FOUND", "message": f"Exam '{slot.exam_id}' not found"})
 
     # Marking policy — required
     policy_row = (await db.execute(select(MarkingPolicy).where(MarkingPolicy.exam_id == exam.id))).scalar_one_or_none()
