@@ -1283,16 +1283,16 @@ paths:
                   minimum: 1
                   description: Maximum marks a student can score
                 passing_marks:
-                  type: integer
-                  minimum: 0
-                  description: Minimum marks needed to pass
+                  type: number
+                  minimum: 0.1
+                  description: "Minimum marks needed to pass. **Must be ≤ total_marks.**"
                 fee:
                   type: number
                   minimum: 0
                   description: Registration fee in Rupees (₹)
                 status:
                   type: string
-                  enum: [scheduled, ongoing, completed, cancelled]
+                  enum: [draft, published, scheduled, ongoing, completed, cancelled]
                   default: scheduled
                   description: Initial status (almost always `scheduled`)
             example:
