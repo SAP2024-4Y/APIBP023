@@ -86,7 +86,7 @@ class Registration(Base):
     id = Column(String, primary_key=True, default=_uuid)
     student_id = Column(String, ForeignKey("users.id"), nullable=False)
     slot_id = Column(String, ForeignKey("exam_slots.id"), nullable=False)
-    status = Column(String, default="registered")  # registered | confirmed | cancelled | completed
+    status = Column(String, default="registered")  # registered | cancelled | completed
     score = Column(Float)
     grade = Column(String)
     registered_at = Column(DateTime, server_default=func.now())
