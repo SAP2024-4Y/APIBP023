@@ -959,12 +959,17 @@ components:
           schema:
             type: object
             properties:
-              error:
+              detail:
                 type: object
                 properties:
                   code: { type: string, example: RATE_LIMITED }
-                  message: { type: string, example: Rate limit exceeded }
-                  retry_after: { type: integer, example: 30 }
+                  message: { type: string, example: 'Too many requests — please slow down.' }
+                  retry_after: { type: integer, example: 60 }
+          example:
+            detail:
+              code: RATE_LIMITED
+              message: 'Too many requests — please slow down.'
+              retry_after: 60
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 paths:
