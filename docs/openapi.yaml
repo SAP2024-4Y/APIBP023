@@ -1083,6 +1083,144 @@ paths:
         "429":
           $ref: "#/components/responses/TooManyRequests"
 
+  /api/v1/auth/register:
+    post:
+      tags: [auth]
+      summary: Create a new student account
+      description: |
+        Register a new student account. The response includes a JWT token so the
+        user is logged in immediately after registration.
+
+        New accounts always have the **`student` role**. Instructor and admin accounts
+        must be created directly by an admin (no self-service upgrade).
+
+        **Rate limit:** 10 requests per minute.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, email, password]
+              properties:
+                username:
+                  type: string
+                  example: john_doe
+                email:
+                  type: string
+                  format: email
+                  example: john@example.com
+                password:
+                  type: string
+                  minLength: 8
+                  description: Must be at least 8 characters
+                  example: securepass123
+                full_name:
+                  type: string
+                  example: John Doe
+            example:
+              username: john_doe
+              email: john@example.com
+              password: securepass123
+              full_name: John Doe
+      responses:
+        "201":
+          description: Account created — token returned, user is now logged in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+              example:
+                token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.example
+                token_type: bearer
+                expires_in: 28800
+        "409":
+          description: Username or email already registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                username_taken:
+                  summary: Username already exists
+                  value:
+                    detail:
+                      code: USERNAME_TAKEN
+                      message: "Username 'john_doe' is already registered"
+                email_taken:
+                  summary: Email already registered
+                  value:
+                    detail:
+                      code: EMAIL_TAKEN
+                      message: "Email 'john@example.com' is already registered"
+        "422":
+          description: Missing or invalid fields
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                missing_username:
+                  summary: Empty username
+                  value:
+                    detail:
+                      code: MISSING_FIELDS
+                      message: username is required
+                password_too_short:
+                  summary: Password too short
+                  value:
+                    detail:
+                      code: MISSING_FIELDS
+                      message: password must be at least 8 characters
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /api/v1/auth/me:
+    get:
+      tags: [auth]
+      summary: Get the currently logged-in user's profile
+      description: |
+        Returns the profile of the user identified by the Bearer token.
+        Use this to retrieve your user ID, role, and display name after logging in
+        — the token itself only contains an opaque user ID.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current user profile
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    example: user-demo-0001
+                  username:
+                    type: string
+                    example: demo
+                  email:
+                    type: string
+                    example: demo@example.com
+                  full_name:
+                    type: string
+                    nullable: true
+                    example: Demo Student
+                  role:
+                    type: string
+                    enum: [student, instructor, admin]
+                    example: student
+              example:
+                id: user-demo-0001
+                username: demo
+                email: demo@example.com
+                full_name: Demo Student
+                role: student
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
   # ============================================================================
   # EXAMS
   # ============================================================================
@@ -1327,15 +1465,29 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
         "422":
-          description: One or more required fields are missing or invalid
+          description: |
+            One or more required fields are missing or fail validation.
+
+            Validation rules enforced:
+            - `total_marks` must be > 0
+            - `passing_marks` must be > 0 and ≤ `total_marks`
+            - `duration_minutes` must be > 0
+            - `fee` must be ≥ 0
+            - `status` must be one of `draft | published | scheduled | ongoing | completed | cancelled`
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-              example:
-                detail:
-                  code: MISSING_FIELDS
-                  message: "Missing: passing_marks, fee"
+              examples:
+                missing_field:
+                  summary: Required field missing
+                  value: { detail: { code: MISSING_FIELDS, message: "title: field required" } }
+                invalid_marks:
+                  summary: passing_marks exceeds total_marks
+                  value: { detail: { code: MISSING_FIELDS, message: "passing_marks cannot exceed total_marks" } }
+                invalid_status:
+                  summary: Unknown status value
+                  value: { detail: { code: MISSING_FIELDS, message: "status: Input should be 'draft', 'published', 'scheduled', 'ongoing', 'completed' or 'cancelled'" } }
         "429":
           $ref: "#/components/responses/TooManyRequests"
 

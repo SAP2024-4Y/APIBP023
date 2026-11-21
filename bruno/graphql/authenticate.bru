@@ -1,0 +1,28 @@
+meta {
+  name: GraphQL Authenticate
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{base_url}}/graphql
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "query": "mutation { authenticate(username: \"demo\", password: \"demo-password\") { token tokenType expiresIn } }"
+  }
+}
+
+script:post-response {
+  if (res.body.data && res.body.data.authenticate) {
+    bru.setEnvVar("student_token", res.body.data.authenticate.token);
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.authenticate.token: isDefined
+}

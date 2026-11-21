@@ -1,0 +1,25 @@
+meta {
+  name: GraphQL Cancel Registration
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{base_url}}/graphql
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{student_token}}
+}
+
+body:json {
+  {
+    "query": "mutation { cancelRegistration(slotId: \"{{demo_slot_id}}\") { registration { id status } error { code message } } }"
+  }
+}
+
+assert {
+  res.status: eq 200
+}

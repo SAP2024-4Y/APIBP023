@@ -71,6 +71,9 @@ async def nearby_centers(
     db: AsyncSession = Depends(get_db),
 ):
     rows = (await db.execute(select(ExamCenter))).scalars().all()
+    # NOTE: fetches all centres then filters in Python via Haversine.
+    # Fine for the current 5-centre seed. For thousands of centres, replace with
+    # a bounding-box SQL pre-filter or a PostGIS spatial index.
     results = []
     for c in rows:
         dist = _haversine(latitude, longitude, c.latitude, c.longitude)

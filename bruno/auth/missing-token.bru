@@ -1,0 +1,16 @@
+meta {
+  name: Access Protected Endpoint Without Token
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{base_url}}/api/v1/registrations
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 401
+  res.body.detail.code: eq TOKEN_INVALID
+}

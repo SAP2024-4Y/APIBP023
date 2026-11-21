@@ -1,0 +1,22 @@
+meta {
+  name: GraphQL List Exams
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{base_url}}/graphql
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "query": "{ exams { id title subject totalMarks status } }"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.exams: isDefined
+}

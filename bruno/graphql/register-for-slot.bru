@@ -1,0 +1,25 @@
+meta {
+  name: GraphQL Register For Slot
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{base_url}}/graphql
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{student_token}}
+}
+
+body:json {
+  {
+    "query": "mutation { registerForSlot(slotId: \"{{demo_slot_id}}\") { registration { id status slotId } error { code message } } }"
+  }
+}
+
+assert {
+  res.status: eq 200
+}
