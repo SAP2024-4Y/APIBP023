@@ -1,0 +1,16 @@
+meta {
+  name: Nearby Centers – Kolkata
+  type: http
+  seq: 9
+}
+
+get {
+  url: {{base_url}}/api/v1/exam-centers/nearby?latitude=22.5726&longitude=88.3639&radius_km=50
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.data: isDefined
+}
