@@ -185,6 +185,9 @@ def evaluate_script(
             verdict=verdict,
         ))
 
+    # Scores cannot go below zero — negative-marking policies can't penalise past 0
+    total_score = max(0.0, total_score)
+
     # Max score = number of questions * marks_correct (questions without a key contribute 0)
     keyed_count = sum(1 for q in questions if q.get("answer_key_correct_answer") is not None)
     max_score = keyed_count * policy.marks_correct
