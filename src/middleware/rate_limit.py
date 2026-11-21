@@ -12,7 +12,7 @@ async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded) 
     resp = JSONResponse(
         status_code=429,
         content={
-            "error": {
+            "detail": {
                 "code": "RATE_LIMITED",
                 "message": "Too many requests — please slow down.",
                 "retry_after": retry_after,
