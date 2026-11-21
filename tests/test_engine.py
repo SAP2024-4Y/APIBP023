@@ -169,7 +169,8 @@ class TestEvaluateScript:
         questions = self._make_questions([("mcq", "A"), ("mcq", "B")])
         answers = {"q1": "C", "q2": "D"}
         result = evaluate_script(questions, answers, DEFAULT_POLICY, total_marks=100, passing_marks=33)
-        assert result.total_score == -2.0
+        # Score is floored at 0.0 — negative marking cannot produce a negative total
+        assert result.total_score == 0.0
         assert result.grade == "F"
 
     def test_no_answer_key_counts_as_no_key(self):
