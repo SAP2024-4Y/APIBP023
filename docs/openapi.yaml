@@ -84,17 +84,108 @@ servers:
 tags:
   - name: auth
     description: |
-      **Login** — get your access token here first.
-      Every other protected endpoint needs the token you receive here.
+      **Login — get your access token here first.**
+      Every protected endpoint requires a `Bearer <token>` header.
+      Tokens expire after **8 hours**; request a new one with the same credentials.
+
+      **Test accounts (seeded on every fresh start):**
+
+      | Username | Password | Role |
+      |---|---|---|
+      | `demo` | `demo-password` | student |
+      | `instructor1` | `inst-password` | instructor |
+      | `admin` | `admin-password` | admin |
+
+      **Token rules:**
+
+      | Situation | Error code | HTTP status |
+      |---|---|---|
+      | Wrong username or password | `INVALID_CREDENTIALS` | 401 |
+      | Token missing or malformed in `Authorization` header | `TOKEN_INVALID` | 401 |
+      | Token was issued more than 8 hours ago | `TOKEN_EXPIRED` | 401 |
+      | Logged in but your role isn't allowed for that action | `FORBIDDEN` | 403 |
+      | Too many login attempts | `RATE_LIMITED` | 429 |
   - name: exams
     description: |
       **Browse and create exams.**
       Anyone can list and view exams. Only instructors and admins can create them.
+
+      **Data model — what an Exam contains:**
+
+      | Field | Type | Notes |
+      |---|---|---|
+      | `id` | string | Unique identifier (e.g. `exam-001`) |
+      | `title` | string | Display name (e.g. "Class 12 Mathematics Board Exam") |
+      | `subject` | string | Subject area |
+      | `total_marks` | number | Maximum score |
+      | `passing_marks` | number | Minimum score to pass |
+      | `duration_minutes` | number | Allowed time per sitting |
+      | `fee` | number | Registration fee (₹) |
+      | `status` | string | `draft` → `published` → `cancelled` |
+
+      An exam has **no date or location** by itself — those come from ExamSlots.
+      One exam can have many slots at different centres or times.
+
+      **Rules:**
+
+      | Situation | Error code | HTTP status |
+      |---|---|---|
+      | `exam_id` does not exist | `EXAM_NOT_FOUND` | 404 |
+      | Required fields missing in request body | `MISSING_FIELDS` | 422 |
+      | Caller is a student (not instructor/admin) | `FORBIDDEN` | 403 |
+      | Too many requests | `RATE_LIMITED` | 429 |
+
+      **Pagination** (`GET /api/v1/exams`): results use cursor-based pagination.
+      Pass `cursor` from the previous response's `next_cursor` field to get the next page.
   - name: exam-centers
     description: |
       **Find exam venues.**
       Search all 5 seeded exam centres across India by proximity to your location
       or by drawing a rectangle on a map.
+
+      **Data model — what an ExamCenter contains:**
+
+      | Field | Type | Notes |
+      |---|---|---|
+      | `id` | string | e.g. `ctr-001` |
+      | `name` | string | Official centre name |
+      | `city` | string | City name |
+      | `state` | string | State name |
+      | `address` | string | Full postal address |
+      | `capacity` | number | Maximum concurrent students |
+      | `contact_email` | string | Centre contact |
+      | `coordinates` | array | **GeoJSON order: `[longitude, latitude]`** |
+      | `distance_km` | number | Only present in `/nearby` and `/bbox` responses |
+
+      > ⚠️ **GeoJSON coordinate order is `[longitude, latitude]`** — the reverse of Google Maps (`lat, lon`).
+
+      **Seeded centres and their coordinates:**
+
+      | ID | City | latitude | longitude |
+      |---|---|---|---|
+      | `ctr-001` | Delhi | 28.6139 | 77.2090 |
+      | `ctr-002` | Mumbai | 18.9220 | 72.8236 |
+      | `ctr-003` | Bangalore | 12.9716 | 77.5946 |
+      | `ctr-004` | Chennai | 13.0827 | 80.2707 |
+      | `ctr-005` | Kolkata | 22.5726 | 88.3639 |
+
+      **How to find centres near you:**
+      A browser or mobile app gets the user's GPS position and passes it to `/nearby`:
+      ```js
+      navigator.geolocation.getCurrentPosition(pos => {
+        const { latitude, longitude } = pos.coords;
+        fetch(`/api/v1/exam-centers/nearby?latitude=${latitude}&longitude=${longitude}&radius_km=50`);
+      });
+      ```
+
+      **Rules:**
+
+      | Situation | Error code | HTTP status |
+      |---|---|---|
+      | `center_id` does not exist | `CENTER_NOT_FOUND` | 404 |
+      | `latitude` or `longitude` missing from `/nearby` | `MISSING_REQUIRED_PARAMS` | 422 |
+      | `min_lat ≥ max_lat` or `min_lon ≥ max_lon` on `/bbox` | `INVALID_COORDINATES` | 422 |
+      | Too many requests | `RATE_LIMITED` | 429 |
   - name: exam-slots
     description: |
       **See time slots and book your seat.**
@@ -131,22 +222,137 @@ tags:
     description: |
       **View your exam bookings.**
       After you book a slot, a registration record is created.
-      Check your registrations here.
+      Students see only their own registrations. Admins see all.
+
+      **Data model — what a Registration contains:**
+
+      | Field | Type | Notes |
+      |---|---|---|
+      | `id` | string | Unique registration ID |
+      | `student_id` | string | The student who booked |
+      | `slot_id` | string | The slot that was booked |
+      | `status` | string | `registered` or `cancelled` |
+      | `score` | number or null | Filled after evaluation |
+      | `grade` | string or null | Filled after evaluation |
+      | `registered_at` | string | ISO 8601 timestamp |
+
+      **Rules:**
+
+      | Situation | Error code | HTTP status |
+      |---|---|---|
+      | `reg_id` does not exist | `REGISTRATION_NOT_FOUND` | 404 |
+      | Student tries to view another student's registration | `FORBIDDEN` | 403 |
+      | Token missing or expired | `TOKEN_INVALID` / `TOKEN_EXPIRED` | 401 |
+      | Too many requests | `RATE_LIMITED` | 429 |
   - name: evaluation
     description: |
       **Question bank, answer keys, marking rules, and scoring.**
       Instructors use these endpoints to set up the exam content and trigger
       automated marking after students submit their answers.
+
+      **Data model — evaluation entities:**
+
+      | Entity | Purpose |
+      |---|---|
+      | `Question` | One question belonging to an exam. Type is `mcq` or `integer`. |
+      | `AnswerKey` | The correct answer for one question. Set per question. |
+      | `MarkingPolicy` | Scoring rules for a whole exam: points per correct answer, penalty per wrong answer. |
+      | `AnswerScript` | A student's submitted answers. Created by the submissions API. |
+
+      **Question types:**
+
+      | Type | Body fields | Constraint |
+      |---|---|---|
+      | `mcq` | `question_text`, `options` (array), `question_number` | Must have **≥ 2 options** |
+      | `integer` | `question_text`, `question_number` | No options needed |
+
+      **Setup order (must follow this sequence):**
+      1. Add questions to the exam
+      2. Set an answer key for each question
+      3. Create a marking policy for the exam
+      4. Wait for students to submit
+      5. Trigger `POST /evaluation/scripts/{script_id}/evaluate` per student
+
+      **Rules:**
+
+      | Situation | Error code | HTTP status |
+      |---|---|---|
+      | `exam_id` does not exist | `EXAM_NOT_FOUND` | 404 |
+      | `question_id` does not exist | `QUESTION_NOT_FOUND` | 404 |
+      | No answer key set for that question yet | `ANSWER_KEY_NOT_FOUND` | 404 |
+      | No marking policy set for that exam yet | `POLICY_NOT_FOUND` | 404 |
+      | No answer script for that registration yet | `SCRIPT_NOT_FOUND` | 404 |
+      | Question number already used in this exam | `DUPLICATE_QUESTION_NUMBER` | 409 |
+      | Marking policy already exists (use PUT to update) | `POLICY_EXISTS` | 409 |
+      | Script already evaluated (cannot re-evaluate) | `ALREADY_EVALUATED` | 409 |
+      | MCQ submitted with fewer than 2 options | `INVALID_OPTIONS` | 422 |
+      | Required body fields absent | `MISSING_FIELDS` | 422 |
+      | Caller is a student | `FORBIDDEN` | 403 |
+      | Token missing or expired | `TOKEN_INVALID` / `TOKEN_EXPIRED` | 401 |
+      | Too many requests | `RATE_LIMITED` | 429 |
   - name: submissions
     description: |
       **Submit your answer script.**
-      Students upload their answers here after the exam. You can re-submit
-      (replace your answers) right up until an instructor evaluates your script.
+      Students upload their answers here after the exam.
+      You can re-submit (replace your answers) right up until an instructor evaluates your script.
+
+      **Data model — what a submission contains:**
+
+      | Field | Type | Notes |
+      |---|---|---|
+      | `registration_id` | string | Links the script to your booking |
+      | `answers` | array | List of `{ question_id, selected_option }` objects |
+      | `submitted_at` | string | ISO 8601 timestamp of latest submission |
+      | `status` | string | `submitted` or `evaluated` |
+
+      **Rules:**
+
+      | Situation | Error code | HTTP status |
+      |---|---|---|
+      | Registration does not exist | `REGISTRATION_NOT_FOUND` | 404 |
+      | No answer script on file yet | `SCRIPT_NOT_FOUND` | 404 |
+      | Student tries to view another student's script | `FORBIDDEN` | 403 |
+      | The booking was cancelled before submitting | `REGISTRATION_CANCELLED` | 409 |
+      | Script already evaluated — no more re-submissions | `ALREADY_EVALUATED` | 409 |
+      | Exam has no questions set up yet | `NO_QUESTIONS` | 422 |
+      | Answer references a question not in this exam | `INVALID_QUESTION_IDS` | 422 |
+      | Token missing or expired | `TOKEN_INVALID` / `TOKEN_EXPIRED` | 401 |
+      | Too many requests (limit: 10/minute — stricter than other endpoints) | `RATE_LIMITED` | 429 |
   - name: results
     description: |
       **View scores and the leaderboard.**
-      Students see their own results. Instructors and admins see the full
-      leaderboard for any exam.
+      Students see their own results. Instructors and admins see the full leaderboard for any exam.
+
+      **Data model — what a result contains:**
+
+      | Field | Type | Notes |
+      |---|---|---|
+      | `registration_id` | string | The booking this result belongs to |
+      | `score` | number | Total marks earned |
+      | `grade` | string | Letter grade (A/B/C/F etc.) |
+      | `correct_count` | number | Number of correctly answered questions |
+      | `wrong_count` | number | Number of wrong answers |
+      | `unattempted_count` | number | Questions left blank |
+      | `question_results` | array | Per-question breakdown: question text, your answer, correct answer, marks awarded |
+
+      **Access rules:**
+
+      | Who | What they can see |
+      |---|---|
+      | Student | Their own results only (`GET /results/me`, `GET /results/registrations/{reg_id}` for own registrations) |
+      | Instructor / Admin | Anyone's result, plus the full leaderboard (`GET /results/exams/{exam_id}`) |
+
+      **Error rules:**
+
+      | Situation | Error code | HTTP status |
+      |---|---|---|
+      | Registration does not exist | `REGISTRATION_NOT_FOUND` | 404 |
+      | Exam does not exist | `EXAM_NOT_FOUND` | 404 |
+      | Script exists but has not been evaluated yet | `NOT_EVALUATED` | 404 |
+      | Student tries to view another student's result | `FORBIDDEN` | 403 |
+      | Student tries to view the leaderboard | `FORBIDDEN` | 403 |
+      | Token missing or expired | `TOKEN_INVALID` / `TOKEN_EXPIRED` | 401 |
+      | Too many requests | `RATE_LIMITED` | 429 |
   - name: ops
     description: Health check and service status
 
