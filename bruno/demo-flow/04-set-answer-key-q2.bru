@@ -1,0 +1,27 @@
+meta {
+  name: 04 - Set Answer Key Q2
+  type: http
+  seq: 4
+}
+
+put {
+  url: {{base_url}}/api/v1/evaluation/questions/{{demo_q2_id}}/answer-key
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{admin_token}}
+}
+
+body:json {
+  {
+    "correct_answer": "366",
+    "explanation": "A leap year has 366 days"
+  }
+}
+
+assert {
+  res.status: eq 201
+  res.body.correct_answer: eq 366
+}

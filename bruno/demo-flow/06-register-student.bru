@@ -1,0 +1,26 @@
+meta {
+  name: 06 - Student Registers for Slot
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{base_url}}/api/v1/exam-slots/{{demo_slot_id}}/register
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{student_token}}
+}
+
+script:post-response {
+  bru.setVar("demo_reg_id", res.body.id);
+  bru.setEnvVar("demo_reg_id", res.body.id);
+}
+
+assert {
+  res.status: eq 201
+  res.body.id: isDefined
+  res.body.status: eq registered
+}

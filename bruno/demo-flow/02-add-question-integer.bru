@@ -1,0 +1,33 @@
+meta {
+  name: 02 - Add Integer Question
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{base_url}}/api/v1/evaluation/exams/{{demo_exam_id}}/questions
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{admin_token}}
+}
+
+body:json {
+  {
+    "number": 2,
+    "text": "How many days are in a leap year?",
+    "question_type": "integer"
+  }
+}
+
+script:post-response {
+  bru.setVar("demo_q2_id", res.body.id);
+  bru.setEnvVar("demo_q2_id", res.body.id);
+}
+
+assert {
+  res.status: eq 201
+  res.body.id: isDefined
+}

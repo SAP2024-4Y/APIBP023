@@ -1,0 +1,22 @@
+meta {
+  name: 08 - Evaluate Script
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{base_url}}/api/v1/evaluation/scripts/{{demo_script_id}}/evaluate
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{admin_token}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.total_score: isDefined
+  res.body.grade: isDefined
+  res.body.question_results: isDefined
+}

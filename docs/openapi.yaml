@@ -1,27 +1,127 @@
 openapi: "3.1.0"
+
 info:
   title: Exam Evaluation & Scheduling System
   version: "1.0.0"
-  description: >
-    REST API (Approach A) for exam scheduling, geospatial centre lookup,
-    and conflict-aware slot registration. Team APIBP23N.
+  description: |
+    ## What is this?
+
+    This is the complete API for the **Exam Evaluation & Scheduling System** built by Team APIBP23N.
+    It lets students browse exams, find nearby exam centres, book seats, submit their answers online,
+    and view their scores — all through simple HTTP requests.
+
+    ---
+
+    ## Who uses this API?
+
+    There are **three types of users**, each with different permissions:
+
+    | Role | What they can do |
+    |---|---|
+    | **student** | Browse exams, find centres, book slots, submit answers, view own results |
+    | **instructor** | Everything a student can do, plus: create exams, add questions, set answer keys, set marking rules, trigger evaluation |
+    | **admin** | Full access — everything an instructor can do, plus view any student's data |
+
+    ---
+
+    ## How do I log in?
+
+    Call `POST /api/v1/auth/token` with your username and password.
+    You will get back a **token** (a long string). Copy it and paste it into the
+    **Authorize** button at the top of this page. After that, all protected
+    endpoints will work automatically.
+
+    **Pre-loaded test accounts** (ready to use, no sign-up needed):
+
+    | Username | Password | Role |
+    |---|---|---|
+    | `demo` | `demo-password` | student |
+    | `instructor1` | `inst-password` | instructor |
+    | `admin` | `admin-password` | admin |
+
+    ---
+
+    ## Typical student workflow (step by step)
+
+    1. **Log in** → `POST /api/v1/auth/token` → copy the token → click Authorize above
+    2. **Browse exams** → `GET /api/v1/exams` (filter by subject, fee range, status)
+    3. **Find a nearby centre** → `GET /api/v1/exam-centers/nearby?latitude=28.61&longitude=77.21&radius_km=50`
+    4. **See available slots** → `GET /api/v1/exam-slots?exam_id=exam-001`
+    5. **Book a seat** → `POST /api/v1/exam-slots/slot-001/register`
+    6. **Check your bookings** → `GET /api/v1/registrations`
+    7. **Submit answers** → `POST /api/v1/submissions/{your_registration_id}`
+    8. **View your score** → `GET /api/v1/results/me`
+
+    ## Typical instructor workflow
+
+    1. **Log in** as instructor
+    2. **Create an exam** → `POST /api/v1/exams`
+    3. **Add questions** → `POST /api/v1/evaluation/exams/{exam_id}/questions`
+    4. **Set answer keys** → `PUT /api/v1/evaluation/questions/{q_id}/answer-key`
+    5. **Set marking rules** → `POST /api/v1/evaluation/exams/{exam_id}/marking-policy`
+    6. **Trigger evaluation** → `POST /api/v1/evaluation/scripts/{script_id}/evaluate`
+    7. **View leaderboard** → `GET /api/v1/results/exams/{exam_id}`
+
+    ---
+
+    ## Rate limits
+
+    Every endpoint has a rate limit to prevent abuse. If you hit the limit you will
+    get a `429 Too Many Requests` response. Wait for the number of seconds shown in
+    the `Retry-After` response header before trying again.
+
+    ---
+
+    ## All dates and times
+
+    All dates and times are in **UTC** and use the ISO 8601 format,
+    e.g. `2027-03-01T09:00:00`. The `Z` suffix (meaning UTC) is also accepted.
+
 servers:
   - url: http://localhost:8080
-    description: Local (docker compose)
+    description: Local development server (docker compose — run `docker compose up`)
 
 tags:
   - name: auth
-    description: Token issuance
+    description: |
+      **Login** — get your access token here first.
+      Every other protected endpoint needs the token you receive here.
   - name: exams
-    description: List API — filtering, sorting, cursor pagination
+    description: |
+      **Browse and create exams.**
+      Anyone can list and view exams. Only instructors and admins can create them.
   - name: exam-centers
-    description: Map API — geospatial proximity and bounding-box search
+    description: |
+      **Find exam venues.**
+      Search all 5 seeded exam centres across India by proximity to your location
+      or by drawing a rectangle on a map.
   - name: exam-slots
-    description: Calendar API — time-window queries and conflict-aware booking
+    description: |
+      **See time slots and book your seat.**
+      Each slot links one exam to one centre at a specific date/time.
+      Booking checks for seat availability and prevents double-booking.
   - name: registrations
-    description: View and manage registrations
+    description: |
+      **View your exam bookings.**
+      After you book a slot, a registration record is created.
+      Check your registrations here.
+  - name: evaluation
+    description: |
+      **Question bank, answer keys, marking rules, and scoring.**
+      Instructors use these endpoints to set up the exam content and trigger
+      automated marking after students submit their answers.
+  - name: submissions
+    description: |
+      **Submit your answer script.**
+      Students upload their answers here after the exam. You can re-submit
+      (replace your answers) right up until an instructor evaluates your script.
+  - name: results
+    description: |
+      **View scores and the leaderboard.**
+      Students see their own results. Instructors and admins see the full
+      leaderboard for any exam.
   - name: ops
-    description: Health and meta endpoints
+    description: Health check and service status
 
 # ── Security ─────────────────────────────────────────────────────────────────
 components:
@@ -30,179 +130,753 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+      description: |
+        Paste the `token` value you received from `POST /api/v1/auth/token` here.
+        Format: `Bearer eyJhbGci...` (the word "Bearer" followed by a space and your token).
 
   schemas:
+
+    # ── Error shapes ──────────────────────────────────────────────────────────
     Error:
       type: object
+      description: >
+        Every error response has a `code` (a short machine-readable label) and
+        a `message` (a human-readable explanation).
       required: [code, message]
       properties:
         code:
           type: string
-          example: EXAM_NOT_FOUND
+          description: Short all-caps label identifying the error type
+          example: SLOT_FULL
         message:
           type: string
-          example: Exam 'exam-999' not found
+          description: Plain English explanation of what went wrong
+          example: No available seats in this slot
 
     ErrorEnvelope:
       type: object
+      description: All error responses are wrapped in a `detail` object.
       required: [detail]
       properties:
         detail:
           $ref: "#/components/schemas/Error"
 
+    # ── Auth ──────────────────────────────────────────────────────────────────
     TokenRequest:
       type: object
+      description: Your login credentials.
       required: [username, password]
       properties:
         username:
           type: string
+          description: Your account username
           example: demo
         password:
           type: string
+          description: Your account password
           example: demo-password
 
     TokenResponse:
       type: object
+      description: >
+        The access token you need for all protected endpoints.
+        Copy the `token` value and click the **Authorize** button at the top of
+        this page, then paste it in.
       properties:
         token:
           type: string
+          description: Your JWT access token — treat it like a password, do not share it
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyLWRlbW8tMDAwMSIsInJvbGUiOiJzdHVkZW50In0.abc123
         token_type:
           type: string
+          description: Always "bearer"
           example: bearer
         expires_in:
           type: integer
+          description: How long the token is valid, in seconds (28800 = 8 hours)
           example: 28800
 
+    # ── Location ─────────────────────────────────────────────────────────────
+    Location:
+      type: object
+      description: |
+        A geographic point on Earth described by **latitude** and **longitude**
+        in decimal degrees.
+
+        **How to find your coordinates:**
+        Open Google Maps, right-click anywhere on the map, and the first line
+        shown is your location as `latitude, longitude`.
+
+        | Concept | Simple explanation | Range | India range |
+        |---|---|---|---|
+        | **Latitude** | How far north/south you are | –90° to +90° | ~8° N to ~37° N |
+        | **Longitude** | How far east/west you are | –180° to +180° | ~68° E to ~97° E |
+
+        **Seeded exam centre locations:**
+
+        | Centre | City | Latitude | Longitude |
+        |---|---|---|---|
+        | `ctr-001` | New Delhi | 28.6139 | 77.2090 |
+        | `ctr-002` | Mumbai | 18.9220 | 72.8236 |
+        | `ctr-003` | Bangalore | 12.9716 | 77.5946 |
+        | `ctr-004` | Chennai | 13.0827 | 80.2707 |
+        | `ctr-005` | Kolkata | 22.5726 | 88.3639 |
+      required: [latitude, longitude]
+      properties:
+        latitude:
+          type: number
+          minimum: -90
+          maximum: 90
+          description: >
+            North-south position in decimal degrees.
+            Positive values are north of the equator, negative are south.
+            India's centres are between 12° and 29° N.
+          example: 28.6139
+        longitude:
+          type: number
+          minimum: -180
+          maximum: 180
+          description: >
+            East-west position in decimal degrees.
+            Positive values are east of the Greenwich meridian, negative are west.
+            India's centres are between 72° and 89° E.
+          example: 77.2090
+
+    # ── Exam ──────────────────────────────────────────────────────────────────
     Exam:
       type: object
+      description: >
+        An exam is the top-level item — e.g. "Class 12 Mathematics Board Exam".
+        It defines what the exam is about, how long it lasts, and what it costs
+        to register. Actual date/time/location is set via Exam Slots.
       properties:
         id:
           type: string
+          description: Unique identifier for this exam
+          example: exam-001
         title:
           type: string
+          description: Full display name of the exam
+          example: Class 12 Mathematics Board Exam
         category:
           type: string
-          description: Subject of the exam
+          description: Subject area of the exam (e.g. Mathematics, Physics, Biology)
+          example: Mathematics
         subject:
           type: string
           deprecated: true
-          description: Deprecated — use category
+          description: "Deprecated: same as `category`. Use `category` instead."
+          example: Mathematics
         description:
           type: string
           nullable: true
+          description: Optional longer description of the exam syllabus or instructions
+          example: null
         duration_minutes:
           type: integer
+          description: How long the exam lasts in minutes
+          example: 180
         total_marks:
           type: integer
+          description: Maximum marks a student can score
+          example: 100
         passing_marks:
           type: integer
+          description: Minimum marks needed to pass
+          example: 33
         fee:
           type: number
           format: float
+          description: Registration fee in Indian Rupees (₹)
+          example: 250.0
         status:
           type: string
+          description: |
+            Current state of the exam:
+            - `scheduled` — upcoming, registrations open
+            - `ongoing` — exam is currently in progress
+            - `completed` — exam is over, results may be available
+            - `cancelled` — exam has been cancelled, no registrations allowed
           enum: [scheduled, ongoing, completed, cancelled]
+          example: scheduled
         created_at:
           type: string
           format: date-time
+          description: When this exam record was created
+          example: "2026-01-15T10:30:00"
 
+    # ── Exam Center ───────────────────────────────────────────────────────────
     ExamCenter:
       type: object
+      description: |
+        A physical venue where exams are held. The system has **5 seeded centres** across India:
+
+        | ID | Name | City | Latitude | Longitude | Capacity |
+        |---|---|---|---|---|---|
+        | `ctr-001` | Delhi Examination Centre | New Delhi | 28.6139 | 77.2090 | 200 |
+        | `ctr-002` | Mumbai Examination Centre | Mumbai | 18.9220 | 72.8236 | 150 |
+        | `ctr-003` | Bangalore Examination Centre | Bangalore | 12.9716 | 77.5946 | 180 |
+        | `ctr-004` | Chennai Examination Centre | Chennai | 13.0827 | 80.2707 | 120 |
+        | `ctr-005` | Kolkata Examination Centre | Kolkata | 22.5726 | 88.3639 | 160 |
+
+        **About the `coordinates` field:**
+        The API follows the **GeoJSON standard** which puts **longitude first, then latitude**
+        (the opposite of how most people say it). So `[77.2090, 28.6139]` means
+        longitude=77.2090°E, latitude=28.6139°N — which is New Delhi.
+
+        > **Quick tip:** If you copy coordinates from Google Maps (e.g. `28.6139, 77.2090`),
+        > you need to swap them when searching: put the second number first.
+
+        See the `Location` schema for a full explanation of latitude and longitude.
       properties:
         id:
           type: string
+          description: Unique identifier for this centre
+          example: ctr-001
         name:
           type: string
+          description: Display name of the exam centre
+          example: Delhi Examination Centre
         address:
           type: string
+          description: Street address
+          example: 1 Connaught Place
         city:
           type: string
+          description: City where this centre is located
+          example: New Delhi
         state:
           type: string
+          description: State/territory where this centre is located
+          example: Delhi
         capacity:
           type: integer
+          description: Total number of seats at this centre (across all slots)
+          example: 200
         contact_email:
           type: string
           nullable: true
+          description: Contact email for the centre. Null if not available.
+          example: null
         coordinates:
           type: array
-          description: "GeoJSON position: [longitude, latitude]"
+          description: |
+            Geographic location of the centre in **GeoJSON order: [longitude, latitude]**.
+
+            ⚠️ **The order is longitude first, then latitude** — this is the GeoJSON standard
+            and is the opposite of how Google Maps shows coordinates.
+
+            | Index | Field | Delhi example |
+            |---|---|---|
+            | `[0]` | Longitude (east-west) | `77.2090` |
+            | `[1]` | Latitude (north-south) | `28.6139` |
+
+            To get the latitude from this array: use `coordinates[1]`.
+            To get the longitude: use `coordinates[0]`.
           items:
             type: number
           minItems: 2
           maxItems: 2
+          example: [77.2090, 28.6139]
         distance_km:
           type: number
           nullable: true
+          description: |
+            How far this centre is from your search point, in kilometres.
+
+            - **Present** in responses from `/nearby` and `/bbox` endpoints
+            - **Absent** (field not included) in the plain `/exam-centers` list endpoint
+
+            Sorted ascending in `/nearby` responses (nearest first).
+          example: 2.47
         created_at:
           type: string
           format: date-time
+          description: When this centre record was created
+          example: "2026-01-01T00:00:00"
 
+    # ── Exam Slot ─────────────────────────────────────────────────────────────
     ExamSlot:
       type: object
+      description: >
+        A specific sitting of an exam at a specific centre on a specific day
+        and time. For example: "Class 12 Maths at Delhi Centre on 1 March 2027,
+        9:00 AM – 12:00 PM, 60 seats available."
+        Students book a slot, not an exam directly.
       properties:
         id:
           type: string
+          description: Unique identifier for this slot
+          example: slot-001
         exam_id:
           type: string
+          description: Which exam this slot belongs to
+          example: exam-001
         center_id:
           type: string
+          description: Which centre this slot is held at
+          example: ctr-001
         starts_at:
           type: string
           format: date-time
+          description: Date and time the exam starts (UTC)
+          example: "2027-03-01T09:00:00"
         ends_at:
           type: string
           format: date-time
+          description: Date and time the exam ends (UTC)
+          example: "2027-03-01T12:00:00"
         capacity:
           type: integer
+          description: Total number of seats in this sitting
+          example: 60
         available_seats:
           type: integer
+          description: Seats still available to book right now
+          example: 58
         created_at:
           type: string
           format: date-time
           nullable: true
+          example: "2026-01-01T00:00:00"
 
+    # ── Registration ──────────────────────────────────────────────────────────
     Registration:
       type: object
+      description: >
+        Created when a student successfully books a slot. This is your proof of
+        registration. Keep the `id` — you will need it to submit your answers
+        and view your result.
       properties:
         id:
           type: string
+          description: Unique registration ID — save this, you will need it later
+          example: a3f1c2d4-0001-0001-0001-000000000001
         student_id:
           type: string
+          description: The ID of the student who made this booking
+          example: user-demo-0001
         slot_id:
           type: string
+          description: Which slot was booked
+          example: slot-001
         status:
           type: string
+          description: |
+            Current booking status:
+            - `registered` — booked, waiting for confirmation
+            - `confirmed` — booking confirmed by admin
+            - `cancelled` — booking was cancelled
+            - `completed` — exam taken, result available
           enum: [registered, confirmed, cancelled, completed]
+          example: registered
         score:
           type: number
           nullable: true
+          description: Final score after evaluation. Null until the exam is marked.
+          example: null
         grade:
           type: string
           nullable: true
+          description: >
+            Grade letter (e.g. A, B, C, F) assigned after evaluation.
+            Null until the exam is marked.
+          example: null
         registered_at:
           type: string
           format: date-time
           nullable: true
+          description: When you booked this slot
+          example: "2026-11-21T08:00:00"
 
+    # ── Evaluation domain ─────────────────────────────────────────────────────
+    Question:
+      type: object
+      description: >
+        A single question belonging to an exam. Supports three types:
+        multiple-choice (mcq), exact number (integer), or free-text (descriptive).
+      properties:
+        id:
+          type: string
+          description: Unique question ID
+          example: q-uuid-0001
+        exam_id:
+          type: string
+          description: Which exam this question belongs to
+          example: exam-001
+        number:
+          type: integer
+          description: Question number shown to the student (starts at 1, unique per exam)
+          example: 1
+        text:
+          type: string
+          description: The question text as it appears on the paper
+          example: What is the derivative of x²?
+        question_type:
+          type: string
+          description: |
+            - `mcq` — multiple choice; student picks one of the provided options
+            - `integer` — student enters a whole or decimal number
+            - `descriptive` — student writes a free-text answer; graded by keyword matching
+          enum: [mcq, integer, descriptive]
+          example: mcq
+        options:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: >
+            The list of answer choices. Only present for `mcq` questions.
+            Null for integer and descriptive questions.
+          example: ["x", "2x", "x²", "2x²"]
+        has_answer_key:
+          type: boolean
+          description: Whether an answer key has been set for this question yet
+          example: false
+
+    AnswerKey:
+      type: object
+      description: >
+        The correct answer for a question, set by an instructor. This is hidden
+        from students — only instructors and admins can view it.
+      properties:
+        id:
+          type: string
+          example: ak-uuid-0001
+        question_id:
+          type: string
+          description: Which question this key belongs to
+          example: q-uuid-0001
+        correct_answer:
+          type: string
+          description: |
+            The correct answer, formatted by question type:
+            - **mcq**: the exact option string, e.g. `"2x"`
+            - **integer**: the number as a string, e.g. `"6"`
+            - **descriptive**: a JSON array of required keywords, e.g. `'["photosynthesis","chlorophyll"]'`
+          example: "2x"
+        explanation:
+          type: string
+          nullable: true
+          description: Optional explanation of why this is the correct answer
+          example: The power rule states d/dx(xⁿ) = nxⁿ⁻¹, so d/dx(x²) = 2x.
+        created_by:
+          type: string
+          nullable: true
+          description: User ID of the instructor who set this answer key
+          example: user-inst-0001
+
+    MarkingPolicy:
+      type: object
+      description: >
+        The scoring rules for an exam. Defines how many marks are given for a
+        correct answer, deducted for a wrong one, and awarded for partial credit
+        on descriptive questions.
+      properties:
+        id:
+          type: string
+          example: mp-uuid-0001
+        exam_id:
+          type: string
+          example: exam-001
+        marks_correct:
+          type: number
+          description: Marks added for each correct answer. Must be greater than 0.
+          example: 4.0
+        marks_wrong:
+          type: number
+          description: >
+            Marks change for each wrong answer. Use a **negative** number for
+            negative marking (e.g. `-1` deducts 1 mark per wrong answer).
+            Use `0` for no penalty.
+          example: -1.0
+        marks_unattempted:
+          type: number
+          description: Marks change for skipped questions. Usually 0.
+          example: 0.0
+        partial_credit_threshold:
+          type: number
+          description: >
+            For descriptive questions only. The fraction of keywords the student
+            must match to earn partial credit. E.g. `0.5` means at least half
+            the keywords must appear.
+          example: 0.5
+        partial_credit_ratio:
+          type: number
+          description: >
+            For descriptive questions only. What fraction of `marks_correct` is
+            awarded as partial credit. E.g. `0.5` means half marks.
+          example: 0.5
+
+    AnswerScript:
+      type: object
+      description: >
+        A student's complete answer submission for one registration.
+        Think of it as the digital answer sheet handed in at the end of the exam.
+      properties:
+        id:
+          type: string
+          description: Unique script ID — instructors use this to trigger evaluation
+          example: script-uuid-0001
+        registration_id:
+          type: string
+          description: Which registration (slot booking) this script belongs to
+          example: a3f1c2d4-0001-0001-0001-000000000001
+        submitted_at:
+          type: string
+          format: date-time
+          description: When the student submitted their answers
+          example: "2027-03-01T11:55:00"
+        evaluated:
+          type: boolean
+          description: Whether an instructor has run the marking engine on this script yet
+          example: false
+        evaluated_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the script was marked. Null until evaluation runs.
+          example: null
+        answer_count:
+          type: integer
+          description: Number of questions answered in this submission
+          example: 30
+
+    AnswerItem:
+      type: object
+      description: One student answer to one question within a submitted script.
+      properties:
+        question_id:
+          type: string
+          example: q-uuid-0001
+        question_number:
+          type: integer
+          description: Display order number of the question
+          example: 1
+        answer:
+          type: string
+          nullable: true
+          description: What the student answered. Null means the question was skipped.
+          example: "2x"
+
+    QuestionResult:
+      type: object
+      description: The marking engine's verdict on one question for one student.
+      properties:
+        question_id:
+          type: string
+          example: q-uuid-0001
+        question_number:
+          type: integer
+          example: 1
+        question_type:
+          type: string
+          example: mcq
+        student_answer:
+          type: string
+          nullable: true
+          description: What the student wrote. Null if skipped.
+          example: "2x"
+        correct_answer:
+          type: string
+          nullable: true
+          description: The correct answer, as set in the answer key.
+          example: "2x"
+        marks_awarded:
+          type: number
+          description: Marks given for this question (can be negative if wrong with penalty)
+          example: 4.0
+        verdict:
+          type: string
+          description: |
+            - `correct` — full marks
+            - `wrong` — wrong answer (penalty may apply)
+            - `unattempted` — student skipped this question
+            - `partial` — partial credit for descriptive question
+          enum: [correct, wrong, unattempted, partial]
+          example: correct
+
+    EvaluationResult:
+      type: object
+      description: >
+        The full result returned immediately after an instructor triggers evaluation.
+        Contains the total score, grade, and a breakdown per question.
+      properties:
+        script_id:
+          type: string
+          example: script-uuid-0001
+        registration_id:
+          type: string
+          example: a3f1c2d4-0001-0001-0001-000000000001
+        total_score:
+          type: number
+          description: Total marks scored
+          example: 72.0
+        max_score:
+          type: number
+          description: Maximum possible marks (equals exam `total_marks`)
+          example: 100.0
+        percentage:
+          type: number
+          description: Score as a percentage
+          example: 72.0
+        grade:
+          type: string
+          description: Grade letter assigned based on percentage
+          example: B
+        question_results:
+          type: array
+          description: Per-question breakdown
+          items:
+            $ref: "#/components/schemas/QuestionResult"
+
+    ResultSummary:
+      type: object
+      description: A brief result summary for one registration (used in the "my results" list).
+      properties:
+        registration_id:
+          type: string
+          example: a3f1c2d4-0001-0001-0001-000000000001
+        slot_id:
+          type: string
+          example: slot-001
+        status:
+          type: string
+          example: completed
+        score:
+          type: number
+          nullable: true
+          example: 72.0
+        grade:
+          type: string
+          nullable: true
+          example: B
+        registered_at:
+          type: string
+          format: date-time
+          nullable: true
+          example: "2026-11-21T08:00:00"
+
+    ResultDetail:
+      type: object
+      description: >
+        Full result for one registration including the per-question breakdown.
+        Shows what the student answered vs. what was correct for each question.
+      properties:
+        registration_id:
+          type: string
+          example: a3f1c2d4-0001-0001-0001-000000000001
+        exam_id:
+          type: string
+          example: exam-001
+        exam_title:
+          type: string
+          example: Class 12 Mathematics Board Exam
+        slot_id:
+          type: string
+          example: slot-001
+        score:
+          type: number
+          example: 72.0
+        grade:
+          type: string
+          example: B
+        status:
+          type: string
+          example: completed
+        evaluated_at:
+          type: string
+          format: date-time
+          nullable: true
+          example: "2027-03-02T14:00:00"
+        questions:
+          type: array
+          items:
+            type: object
+            properties:
+              question_number:
+                type: integer
+                example: 1
+              question_text:
+                type: string
+                example: What is the derivative of x²?
+              question_type:
+                type: string
+                example: mcq
+              student_answer:
+                type: string
+                nullable: true
+                example: "2x"
+              correct_answer:
+                type: string
+                nullable: true
+                example: "2x"
+
+    LeaderboardEntry:
+      type: object
+      description: One student's position on the exam leaderboard.
+      properties:
+        rank:
+          type: integer
+          description: Position on the leaderboard (1 = top scorer)
+          example: 1
+        student_id:
+          type: string
+          example: user-demo-0001
+        student_name:
+          type: string
+          nullable: true
+          example: Demo Student
+        slot_id:
+          type: string
+          example: slot-001
+        score:
+          type: number
+          example: 88.0
+        grade:
+          type: string
+          example: A
+
+  # ── Reusable Responses ────────────────────────────────────────────────────
   responses:
     Unauthorized:
-      description: Missing or invalid Bearer token
+      description: |
+        **401 — Not logged in or token expired.**
+        You either did not send a token, your token is invalid, or it has expired
+        (tokens last 8 hours). Call `POST /api/v1/auth/token` again to get a fresh token.
       headers:
-        RateLimit-Limit: { schema: { type: integer } }
-        RateLimit-Remaining: { schema: { type: integer } }
-        RateLimit-Reset: { schema: { type: integer } }
+        RateLimit-Limit:
+          schema: { type: integer }
+          description: Max requests allowed per window
+        RateLimit-Remaining:
+          schema: { type: integer }
+          description: Requests remaining in the current window
+        RateLimit-Reset:
+          schema: { type: integer }
+          description: Unix timestamp when the window resets
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorEnvelope"
-          example:
-            detail:
-              code: TOKEN_INVALID
-              message: Missing Bearer token
+          examples:
+            MissingToken:
+              summary: No token was sent
+              value:
+                detail:
+                  code: TOKEN_INVALID
+                  message: Missing Bearer token
+            ExpiredToken:
+              summary: Token has expired (older than 8 hours)
+              value:
+                detail:
+                  code: TOKEN_EXPIRED
+                  message: Signature has expired
 
     Forbidden:
-      description: Authenticated but insufficient permissions
+      description: |
+        **403 — Logged in but your role does not have permission.**
+        For example, a student trying to create an exam, or viewing another
+        student's private data. Check the endpoint description for the required role.
       content:
         application/json:
           schema:
@@ -213,33 +887,42 @@ components:
               message: "Requires role: instructor, admin"
 
     NotFound:
-      description: Resource not found
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/ErrorEnvelope"
-
-    Conflict:
-      description: Business-rule conflict (full slot, overlapping booking, duplicate)
+      description: |
+        **404 — The item you requested does not exist.**
+        Double-check the ID in the URL.
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorEnvelope"
 
     UnprocessableEntity:
-      description: Validation error
+      description: |
+        **422 — Your request data failed validation.**
+        The response message explains exactly what is wrong.
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorEnvelope"
 
     TooManyRequests:
-      description: Rate limit exceeded
+      description: |
+        **429 — You have sent too many requests too quickly.**
+        Wait for the number of seconds in the `Retry-After` header before retrying.
       headers:
-        RateLimit-Limit: { schema: { type: integer }, example: 100 }
-        RateLimit-Remaining: { schema: { type: integer }, example: 0 }
-        RateLimit-Reset: { schema: { type: integer } }
-        Retry-After: { schema: { type: integer } }
+        RateLimit-Limit:
+          schema: { type: integer }
+          description: Max requests allowed per window
+          example: 100
+        RateLimit-Remaining:
+          schema: { type: integer }
+          description: Requests remaining (0 when you hit this error)
+          example: 0
+        RateLimit-Reset:
+          schema: { type: integer }
+          description: Unix timestamp when your limit resets
+        Retry-After:
+          schema: { type: integer }
+          description: Seconds to wait before retrying
       content:
         application/json:
           schema:
@@ -249,44 +932,95 @@ components:
                 type: object
                 properties:
                   code: { type: string, example: RATE_LIMITED }
-                  message: { type: string }
-                  retry_after: { type: integer }
+                  message: { type: string, example: Rate limit exceeded }
+                  retry_after: { type: integer, example: 30 }
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 paths:
+
+  # ============================================================================
+  # HEALTH
+  # ============================================================================
   /health:
     get:
       tags: [ops]
-      summary: Health check
+      summary: Check if the server is running
+      description: |
+        Returns `{"status": "ok"}` if the server is up and healthy.
+        No authentication required. Use this to verify the server started correctly.
       responses:
         "200":
-          description: Service is healthy
+          description: Server is running normally
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  status: { type: string, example: ok }
+                  status:
+                    type: string
+                    example: ok
+              example:
+                status: ok
 
+  # ============================================================================
+  # AUTH
+  # ============================================================================
   /api/v1/auth/token:
     post:
       tags: [auth]
-      summary: Issue a JWT access token
+      summary: Log in and get your access token
+      description: |
+        **Start here.** Send your username and password to receive a JWT access token.
+
+        The token is valid for **8 hours**. After that you need to log in again.
+
+        Once you have the token, click the **Authorize 🔓** button at the top of
+        this page and paste it in. All protected endpoints will then work automatically.
+
+        **Pre-loaded test accounts:**
+
+        | Username | Password | Role |
+        |---|---|---|
+        | `demo` | `demo-password` | student |
+        | `instructor1` | `inst-password` | instructor |
+        | `admin` | `admin-password` | admin |
+
+        **Rate limit:** 20 requests per minute.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               $ref: "#/components/schemas/TokenRequest"
+            examples:
+              LoginAsStudent:
+                summary: Log in as the demo student
+                value:
+                  username: demo
+                  password: demo-password
+              LoginAsInstructor:
+                summary: Log in as an instructor
+                value:
+                  username: instructor1
+                  password: inst-password
+              LoginAsAdmin:
+                summary: Log in as admin
+                value:
+                  username: admin
+                  password: admin-password
       responses:
         "200":
-          description: Token issued
+          description: Login successful — copy the `token` value
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/TokenResponse"
+              example:
+                token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyLWRlbW8tMDAwMSIsInJvbGUiOiJzdHVkZW50In0.example
+                token_type: bearer
+                expires_in: 28800
         "401":
-          description: Invalid credentials
+          description: Wrong username or password
           content:
             application/json:
               schema:
@@ -298,44 +1032,117 @@ paths:
         "429":
           $ref: "#/components/responses/TooManyRequests"
 
+  # ============================================================================
+  # EXAMS
+  # ============================================================================
   /api/v1/exams:
     get:
       tags: [exams]
-      summary: List exams — filtering, sorting, cursor pagination
+      summary: Browse all exams
+      description: |
+        Returns a list of exams. No login required.
+
+        You can **filter** by subject, status, and registration fee range.
+        You can **sort** by creation date, fee, title, etc.
+        Results are **paginated** — use `next_cursor` from the response to fetch
+        the next page.
+
+        **Seeded exams to try:** `exam-001` (Class 12 Maths, ₹250),
+        `exam-011` (JEE Main Maths, ₹650), `exam-013` (NEET Biology, ₹800)
+
+        **Rate limit:** 100 requests per minute.
       parameters:
         - name: status
           in: query
-          schema: { type: string, enum: [scheduled, ongoing, completed, cancelled] }
+          required: false
+          description: |
+            Filter by exam status. Options:
+            - `scheduled` — upcoming exam, registrations open
+            - `ongoing` — currently in progress
+            - `completed` — over, results may be available
+            - `cancelled` — exam cancelled
+          schema:
+            type: string
+            enum: [scheduled, ongoing, completed, cancelled]
+          example: scheduled
         - name: category
           in: query
-          description: Subject substring match
-          schema: { type: string }
+          required: false
+          description: |
+            Filter by subject — partial match, case-insensitive.
+            For example, `Math` will return "Mathematics" exams.
+            Try: `Mathematics`, `Physics`, `Biology`, `Aptitude`, `Computer Science`
+          schema:
+            type: string
+          example: Mathematics
         - name: min_price
           in: query
-          schema: { type: number, minimum: 0 }
+          required: false
+          description: |
+            Only show exams with a registration fee **at or above** this amount (in ₹).
+            For example, `min_price=500` hides all exams cheaper than ₹500.
+          schema:
+            type: number
+            minimum: 0
+          example: 200
         - name: max_price
           in: query
-          schema: { type: number, minimum: 0 }
+          required: false
+          description: |
+            Only show exams with a registration fee **at or below** this amount (in ₹).
+            For example, `max_price=300` shows only exams costing ₹300 or less.
+          schema:
+            type: number
+            minimum: 0
+          example: 500
         - name: sort
           in: query
-          schema: { type: string, default: created_at }
+          required: false
+          description: |
+            Which field to sort by. Allowed values:
+            `created_at`, `fee`, `title`, `subject`, `duration_minutes`, `total_marks`
+          schema:
+            type: string
+            default: created_at
+          example: fee
         - name: order
           in: query
-          schema: { type: string, enum: [asc, desc], default: desc }
+          required: false
+          description: Sort direction. `asc` = cheapest/oldest first, `desc` = most expensive/newest first.
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+          example: asc
         - name: limit
           in: query
-          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+          required: false
+          description: How many results to return per page. Maximum 100.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+          example: 10
         - name: after
           in: query
-          description: Opaque cursor from previous page's next_cursor
-          schema: { type: string }
+          required: false
+          description: |
+            **Pagination cursor** — to get the next page, copy the `next_cursor`
+            value from the previous response and paste it here.
+            Leave empty to start from the beginning.
+          schema:
+            type: string
       responses:
         "200":
-          description: Paginated exam list
+          description: List of exams matching your filters
           headers:
-            RateLimit-Limit: { schema: { type: integer } }
-            RateLimit-Remaining: { schema: { type: integer } }
-            RateLimit-Reset: { schema: { type: integer } }
+            RateLimit-Limit:
+              schema: { type: integer }
+            RateLimit-Remaining:
+              schema: { type: integer }
+            RateLimit-Reset:
+              schema: { type: integer }
           content:
             application/json:
               schema:
@@ -343,21 +1150,60 @@ paths:
                 properties:
                   data:
                     type: array
+                    description: The list of exams
                     items:
                       $ref: "#/components/schemas/Exam"
                   has_more:
                     type: boolean
+                    description: True if there are more pages. Use `next_cursor` to fetch the next page.
                   next_cursor:
                     type: string
                     nullable: true
+                    description: Paste this value into the `after` parameter to get the next page. Null on the last page.
                   limit:
                     type: integer
+                    description: The page size that was used
+              example:
+                data:
+                  - id: exam-001
+                    title: Class 12 Mathematics Board Exam
+                    category: Mathematics
+                    subject: Mathematics
+                    description: null
+                    duration_minutes: 180
+                    total_marks: 100
+                    passing_marks: 33
+                    fee: 250.0
+                    status: scheduled
+                    created_at: "2026-01-01T00:00:00"
+                  - id: exam-002
+                    title: Class 12 Physics Board Exam
+                    category: Physics
+                    subject: Physics
+                    description: null
+                    duration_minutes: 180
+                    total_marks: 100
+                    passing_marks: 33
+                    fee: 250.0
+                    status: scheduled
+                    created_at: "2026-01-01T00:00:00"
+                has_more: true
+                next_cursor: eyJpZCI6ImV4YW0tMDAyIiwidHMiOiIyMDI2LTAxLTAxVDAwOjAwOjAwIn0=
+                limit: 2
         "429":
           $ref: "#/components/responses/TooManyRequests"
 
     post:
       tags: [exams]
-      summary: Create an exam (instructor / admin)
+      summary: Create a new exam
+      description: |
+        **Requires login as `instructor` or `admin`.**
+
+        Creates a new exam record. This only defines the exam details —
+        to schedule actual sittings with dates and locations, create Exam Slots
+        (not covered in this endpoint).
+
+        **Rate limit:** 30 requests per minute.
       security:
         - bearerAuth: []
       requestBody:
@@ -368,54 +1214,154 @@ paths:
               type: object
               required: [title, subject, duration_minutes, total_marks, passing_marks, fee]
               properties:
-                title: { type: string }
-                subject: { type: string }
-                description: { type: string }
-                duration_minutes: { type: integer }
-                total_marks: { type: integer }
-                passing_marks: { type: integer }
-                fee: { type: number }
-                status: { type: string, default: scheduled }
+                title:
+                  type: string
+                  description: Full display name of the exam
+                subject:
+                  type: string
+                  description: Subject area (e.g. Mathematics, Physics, Biology)
+                description:
+                  type: string
+                  description: Optional longer description or instructions
+                duration_minutes:
+                  type: integer
+                  minimum: 1
+                  description: How long the exam lasts in minutes
+                total_marks:
+                  type: integer
+                  minimum: 1
+                  description: Maximum marks a student can score
+                passing_marks:
+                  type: integer
+                  minimum: 0
+                  description: Minimum marks needed to pass
+                fee:
+                  type: number
+                  minimum: 0
+                  description: Registration fee in Rupees (₹)
+                status:
+                  type: string
+                  enum: [scheduled, ongoing, completed, cancelled]
+                  default: scheduled
+                  description: Initial status (almost always `scheduled`)
+            example:
+              title: Class 10 Science Final Exam
+              subject: Science
+              description: Annual final examination covering Physics, Chemistry and Biology
+              duration_minutes: 180
+              total_marks: 100
+              passing_marks: 35
+              fee: 300.0
       responses:
         "201":
-          description: Exam created
+          description: Exam created successfully
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Exam"
+              example:
+                id: exam-021
+                title: Class 10 Science Final Exam
+                category: Science
+                subject: Science
+                description: Annual final examination covering Physics, Chemistry and Biology
+                duration_minutes: 180
+                total_marks: 100
+                passing_marks: 35
+                fee: 300.0
+                status: scheduled
+                created_at: "2026-11-21T10:00:00"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "422":
-          $ref: "#/components/responses/UnprocessableEntity"
+          description: One or more required fields are missing or invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                detail:
+                  code: MISSING_FIELDS
+                  message: "Missing: passing_marks, fee"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
   /api/v1/exams/{exam_id}:
     get:
       tags: [exams]
-      summary: Get a single exam
+      summary: Get details of one specific exam
+      description: |
+        Returns full details for a single exam. No login required.
+
+        **Try it:** Use `exam-001` for Class 12 Maths, `exam-013` for NEET Biology.
+
+        **Rate limit:** 100 requests per minute.
       parameters:
         - name: exam_id
           in: path
           required: true
-          schema: { type: string }
+          description: The ID of the exam to fetch (e.g. `exam-001`)
+          schema:
+            type: string
+          example: exam-001
       responses:
         "200":
-          description: Exam detail
+          description: Exam details
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Exam"
+              example:
+                id: exam-001
+                title: Class 12 Mathematics Board Exam
+                category: Mathematics
+                subject: Mathematics
+                description: null
+                duration_minutes: 180
+                total_marks: 100
+                passing_marks: 33
+                fee: 250.0
+                status: scheduled
+                created_at: "2026-01-01T00:00:00"
         "404":
-          $ref: "#/components/responses/NotFound"
+          description: No exam found with that ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                detail:
+                  code: EXAM_NOT_FOUND
+                  message: Exam 'exam-999' not found
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
+  # ============================================================================
+  # EXAM CENTERS
+  # ============================================================================
   /api/v1/exam-centers:
     get:
       tags: [exam-centers]
-      summary: List all exam centers
+      summary: List all exam centres
+      description: |
+        Returns all 5 seeded exam centres across India. No login required.
+
+        **Seeded centres:**
+
+        | ID | Name | City |
+        |---|---|---|
+        | `ctr-001` | Delhi Examination Centre | New Delhi |
+        | `ctr-002` | Mumbai Examination Centre | Mumbai |
+        | `ctr-003` | Bangalore Examination Centre | Bangalore |
+        | `ctr-004` | Chennai Examination Centre | Chennai |
+        | `ctr-005` | Kolkata Examination Centre | Kolkata |
+
+        **Rate limit:** 100 requests per minute.
       responses:
         "200":
-          description: Center list
+          description: List of all exam centres
           content:
             application/json:
               schema:
@@ -425,27 +1371,86 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/ExamCenter"
-                  count: { type: integer }
+                  count:
+                    type: integer
+                    description: Total number of centres returned
+              example:
+                data:
+                  - id: ctr-001
+                    name: Delhi Examination Centre
+                    address: 1 Connaught Place
+                    city: New Delhi
+                    state: Delhi
+                    capacity: 200
+                    contact_email: null
+                    coordinates: [77.2090, 28.6139]
+                    distance_km: null
+                    created_at: "2026-01-01T00:00:00"
+                  - id: ctr-002
+                    name: Mumbai Examination Centre
+                    address: 5 Marine Drive
+                    city: Mumbai
+                    state: Maharashtra
+                    capacity: 150
+                    contact_email: null
+                    coordinates: [72.8236, 18.9220]
+                    distance_km: null
+                    created_at: "2026-01-01T00:00:00"
+                count: 5
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
   /api/v1/exam-centers/nearby:
     get:
       tags: [exam-centers]
-      summary: Proximity search — exam centres within radius_km
+      summary: Find exam centres near your location
+      description: |
+        Returns all exam centres within a given distance of a point on the map,
+        sorted from nearest to farthest. No login required.
+
+        Each result includes a `distance_km` field showing how far it is from
+        your search point.
+
+        **How to find your coordinates:** Open Google Maps, right-click your
+        location, and copy the latitude and longitude shown.
+
+        **Example:** Search near Delhi (lat=28.6139, lon=77.2090) with a 100 km radius
+        to find the Delhi centre.
+
+        **Rate limit:** 100 requests per minute.
       parameters:
         - name: latitude
           in: query
           required: true
-          schema: { type: number, minimum: -90, maximum: 90 }
+          description: Your latitude in decimal degrees (e.g. 28.6139 for New Delhi)
+          schema:
+            type: number
+            minimum: -90
+            maximum: 90
+          example: 28.6139
         - name: longitude
           in: query
           required: true
-          schema: { type: number, minimum: -180, maximum: 180 }
+          description: Your longitude in decimal degrees (e.g. 77.2090 for New Delhi)
+          schema:
+            type: number
+            minimum: -180
+            maximum: 180
+          example: 77.2090
         - name: radius_km
           in: query
-          schema: { type: number, default: 50.0, exclusiveMinimum: 0 }
+          required: false
+          description: |
+            How far to search, in kilometres. Default is 50 km.
+            Increase to 1500+ to find all 5 Indian centres from anywhere in India.
+          schema:
+            type: number
+            default: 50.0
+            exclusiveMinimum: 0
+          example: 100
       responses:
         "200":
-          description: Centers sorted by distance (nearest first)
+          description: Centres within the search radius, sorted nearest first
           content:
             application/json:
               schema:
@@ -455,32 +1460,83 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/ExamCenter"
-                  count: { type: integer }
+                  count:
+                    type: integer
+              example:
+                data:
+                  - id: ctr-001
+                    name: Delhi Examination Centre
+                    address: 1 Connaught Place
+                    city: New Delhi
+                    state: Delhi
+                    capacity: 200
+                    contact_email: null
+                    coordinates: [77.2090, 28.6139]
+                    distance_km: 0.0
+                    created_at: "2026-01-01T00:00:00"
+                count: 1
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
   /api/v1/exam-centers/bbox:
     get:
       tags: [exam-centers]
-      summary: Bounding-box search — exam centres inside SW/NE rectangle
+      summary: Find exam centres inside a rectangular area on the map
+      description: |
+        Returns all exam centres whose location falls inside a rectangle defined
+        by a south-west corner and a north-east corner. No login required.
+
+        This is useful when you have a map view and want to find all centres
+        visible on screen.
+
+        **Example that covers all of India:**
+        - `min_lat=8.0` `min_lon=68.0` `max_lat=37.0` `max_lon=97.0`
+
+        **Example that covers northern India only:**
+        - `min_lat=25.0` `min_lon=70.0` `max_lat=35.0` `max_lon=85.0`
+        (should return Delhi centre at lat=28.61, lon=77.21)
+
+        **Rate limit:** 100 requests per minute.
       parameters:
         - name: min_lat
           in: query
           required: true
-          schema: { type: number }
+          description: South boundary latitude (bottom-left corner of your rectangle)
+          schema:
+            type: number
+            minimum: -90
+            maximum: 90
+          example: 25.0
         - name: min_lon
           in: query
           required: true
-          schema: { type: number }
+          description: West boundary longitude (bottom-left corner of your rectangle)
+          schema:
+            type: number
+            minimum: -180
+            maximum: 180
+          example: 70.0
         - name: max_lat
           in: query
           required: true
-          schema: { type: number }
+          description: North boundary latitude (top-right corner of your rectangle). Must be greater than `min_lat`.
+          schema:
+            type: number
+            minimum: -90
+            maximum: 90
+          example: 35.0
         - name: max_lon
           in: query
           required: true
-          schema: { type: number }
+          description: East boundary longitude (top-right corner of your rectangle). Must be greater than `min_lon`.
+          schema:
+            type: number
+            minimum: -180
+            maximum: 180
+          example: 85.0
       responses:
         "200":
-          description: Centers inside the bounding box
+          description: Centres inside the bounding box
           content:
             application/json:
               schema:
@@ -490,51 +1546,148 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/ExamCenter"
-                  count: { type: integer }
+                  count:
+                    type: integer
+              example:
+                data:
+                  - id: ctr-001
+                    name: Delhi Examination Centre
+                    address: 1 Connaught Place
+                    city: New Delhi
+                    state: Delhi
+                    capacity: 200
+                    contact_email: null
+                    coordinates: [77.2090, 28.6139]
+                    distance_km: null
+                    created_at: "2026-01-01T00:00:00"
+                count: 1
         "422":
-          $ref: "#/components/responses/UnprocessableEntity"
+          description: |
+            `min_lat` must be less than `max_lat`, and `min_lon` must be less than `max_lon`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                detail:
+                  code: INVALID_COORDINATES
+                  message: min_lat/min_lon must be less than max_lat/max_lon
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
   /api/v1/exam-centers/{center_id}:
     get:
       tags: [exam-centers]
-      summary: Get a single exam center
+      summary: Get details of one specific exam centre
+      description: |
+        Returns full details for a single exam centre. No login required.
+
+        **Try it:** Use `ctr-001` for Delhi, `ctr-002` for Mumbai.
+
+        **Rate limit:** 100 requests per minute.
       parameters:
         - name: center_id
           in: path
           required: true
-          schema: { type: string }
+          description: The ID of the centre to fetch (e.g. `ctr-001`)
+          schema:
+            type: string
+          example: ctr-001
       responses:
         "200":
-          description: Center detail
+          description: Centre details
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ExamCenter"
+              example:
+                id: ctr-001
+                name: Delhi Examination Centre
+                address: 1 Connaught Place
+                city: New Delhi
+                state: Delhi
+                capacity: 200
+                contact_email: null
+                coordinates: [77.2090, 28.6139]
+                distance_km: null
+                created_at: "2026-01-01T00:00:00"
         "404":
-          $ref: "#/components/responses/NotFound"
+          description: No centre found with that ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                detail:
+                  code: CENTER_NOT_FOUND
+                  message: Exam center 'ctr-999' not found
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
+  # ============================================================================
+  # EXAM SLOTS
+  # ============================================================================
   /api/v1/exam-slots:
     get:
       tags: [exam-slots]
-      summary: List exam slots — optional ISO 8601 time-window filter
+      summary: Browse available exam slots
+      description: |
+        Returns exam slots (specific sittings with a date, time, and location).
+        No login required.
+
+        You can filter by exam, centre, or date range to find the slot you want
+        to book.
+
+        Results are sorted by start time, earliest first.
+
+        **Seeded slots to try:** `slot-001` (Maths at Delhi, 1 Mar 2027),
+        `slot-013` (JEE Maths at Mumbai, 1 Apr 2027),
+        `slot-017` (NEET Biology at Chennai, 5 May 2027)
+
+        **Rate limit:** 100 requests per minute.
       parameters:
-        - name: starts_at
-          in: query
-          description: ISO 8601 UTC window start
-          schema: { type: string, format: date-time }
-        - name: ends_at
-          in: query
-          description: ISO 8601 UTC window end
-          schema: { type: string, format: date-time }
         - name: exam_id
           in: query
-          schema: { type: string }
+          required: false
+          description: |
+            Filter to only show slots for one specific exam.
+            Try `exam-001` to see all Class 12 Maths slots.
+          schema:
+            type: string
+          example: exam-001
         - name: center_id
           in: query
-          schema: { type: string }
+          required: false
+          description: |
+            Filter to only show slots at one specific centre.
+            Try `ctr-001` to see all slots at the Delhi centre.
+          schema:
+            type: string
+          example: ctr-001
+        - name: starts_at
+          in: query
+          required: false
+          description: |
+            Only show slots that **end after** this date/time.
+            Use ISO 8601 format, e.g. `2027-03-01T00:00:00`.
+            Together with `ends_at`, this lets you search within a date range.
+          schema:
+            type: string
+            format: date-time
+          example: "2027-03-01T00:00:00"
+        - name: ends_at
+          in: query
+          required: false
+          description: |
+            Only show slots that **start before** this date/time.
+            Use ISO 8601 format, e.g. `2027-04-01T00:00:00`.
+          schema:
+            type: string
+            format: date-time
+          example: "2027-04-01T00:00:00"
       responses:
         "200":
-          description: Slots list
+          description: List of exam slots matching your filters
           content:
             application/json:
               schema:
@@ -544,101 +1697,259 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/ExamSlot"
-                  count: { type: integer }
+                  count:
+                    type: integer
+              example:
+                data:
+                  - id: slot-001
+                    exam_id: exam-001
+                    center_id: ctr-001
+                    starts_at: "2027-03-01T09:00:00"
+                    ends_at: "2027-03-01T12:00:00"
+                    capacity: 60
+                    available_seats: 60
+                    created_at: "2026-01-01T00:00:00"
+                  - id: slot-002
+                    exam_id: exam-001
+                    center_id: ctr-002
+                    starts_at: "2027-03-02T09:00:00"
+                    ends_at: "2027-03-02T12:00:00"
+                    capacity: 50
+                    available_seats: 50
+                    created_at: "2026-01-01T00:00:00"
+                count: 2
         "422":
-          $ref: "#/components/responses/UnprocessableEntity"
+          description: "`starts_at` must be before `ends_at` when both are given"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                detail:
+                  code: INVALID_DATE_RANGE
+                  message: starts_at must be before ends_at
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
   /api/v1/exam-slots/{slot_id}:
     get:
       tags: [exam-slots]
-      summary: Get a single exam slot
+      summary: Get details of one specific exam slot
+      description: |
+        Returns full details for a single slot including available seat count.
+        No login required. Use this to check seat availability before booking.
+
+        **Rate limit:** 100 requests per minute.
       parameters:
         - name: slot_id
           in: path
           required: true
-          schema: { type: string }
+          description: The ID of the slot to fetch (e.g. `slot-001`)
+          schema:
+            type: string
+          example: slot-001
       responses:
         "200":
-          description: Slot detail
+          description: Slot details
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ExamSlot"
+              example:
+                id: slot-001
+                exam_id: exam-001
+                center_id: ctr-001
+                starts_at: "2027-03-01T09:00:00"
+                ends_at: "2027-03-01T12:00:00"
+                capacity: 60
+                available_seats: 60
+                created_at: "2026-01-01T00:00:00"
         "404":
-          $ref: "#/components/responses/NotFound"
+          description: No slot found with that ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                detail:
+                  code: SLOT_NOT_FOUND
+                  message: Slot 'slot-999' not found
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
   /api/v1/exam-slots/{slot_id}/register:
     post:
       tags: [exam-slots]
-      summary: Register for a slot — 409 on conflict or full slot
+      summary: Book a seat in an exam slot
+      description: |
+        **Requires login (any role).**
+
+        Books a seat for the logged-in student. The system automatically checks:
+
+        1. **Is there a free seat?** — returns 409 `SLOT_FULL` if not
+        2. **Are you already booked?** — returns 409 `ALREADY_REGISTERED` if so
+        3. **Does this overlap another exam you booked?** — returns 409 `SLOT_CONFLICT`
+           if you have another exam at the same time
+        4. **Is the exam cancelled?** — returns 422 `EXAM_CANCELLED`
+
+        On success, a Registration is created. **Save the registration `id`** —
+        you need it to submit answers and view results.
+
+        **Rate limit:** 30 requests per minute.
       security:
         - bearerAuth: []
       parameters:
         - name: slot_id
           in: path
           required: true
-          schema: { type: string }
+          description: The ID of the slot to book (e.g. `slot-001`)
+          schema:
+            type: string
+          example: slot-001
       responses:
         "201":
-          description: Registration created
+          description: Booking successful — save the registration `id`
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Registration"
+              example:
+                id: a3f1c2d4-0001-0001-0001-000000000001
+                student_id: user-demo-0001
+                slot_id: slot-001
+                status: registered
+                score: null
+                grade: null
+                registered_at: "2026-11-21T08:00:00"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
-          $ref: "#/components/responses/NotFound"
+          description: Slot not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                detail:
+                  code: SLOT_NOT_FOUND
+                  message: Slot 'slot-999' not found
         "409":
-          description: "Conflict — slot full, overlap, or duplicate"
+          description: |
+            Booking could not be completed due to a conflict. Check the `code` field:
+            - `SLOT_FULL` — no seats left
+            - `ALREADY_REGISTERED` — you already have this slot booked
+            - `SLOT_CONFLICT` — you have another exam at the same time (see `conflicting_registration_id`)
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
               examples:
                 SlotFull:
-                  value: { detail: { code: SLOT_FULL, message: No available seats in this slot } }
-                SlotConflict:
-                  value: { detail: { code: SLOT_CONFLICT, message: Overlapping exam already scheduled } }
+                  summary: No seats left
+                  value:
+                    detail:
+                      code: SLOT_FULL
+                      message: No available seats in this slot
                 AlreadyRegistered:
-                  value: { detail: { code: ALREADY_REGISTERED, message: You are already registered for this slot } }
+                  summary: You already booked this slot
+                  value:
+                    detail:
+                      code: ALREADY_REGISTERED
+                      message: You are already registered for this slot
+                SlotConflict:
+                  summary: Time overlap with another exam you booked
+                  value:
+                    detail:
+                      code: SLOT_CONFLICT
+                      message: You already have an exam scheduled that overlaps with this time window
+                      conflicting_registration_id: a3f1c2d4-0001-0001-0001-000000000001
         "422":
-          $ref: "#/components/responses/UnprocessableEntity"
+          description: Exam is cancelled — cannot book a slot for a cancelled exam
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                detail:
+                  code: EXAM_CANCELLED
+                  message: Cannot register for a cancelled exam
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
     delete:
       tags: [exam-slots]
-      summary: Cancel your registration for a slot
+      summary: Cancel your booking for a slot
+      description: |
+        **Requires login (any role).**
+
+        Cancels your booking for the specified slot and returns your seat to the
+        available pool. Only your own bookings can be cancelled.
+
+        **Rate limit:** 30 requests per minute.
       security:
         - bearerAuth: []
       parameters:
         - name: slot_id
           in: path
           required: true
-          schema: { type: string }
+          description: The ID of the slot whose booking you want to cancel
+          schema:
+            type: string
+          example: slot-001
       responses:
         "200":
-          description: Registration cancelled
+          description: Booking cancelled and seat returned
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  message: { type: string }
-                  registration_id: { type: string }
+                  message:
+                    type: string
+                    example: Registration cancelled
+                  registration_id:
+                    type: string
+                    example: a3f1c2d4-0001-0001-0001-000000000001
+              example:
+                message: Registration cancelled
+                registration_id: a3f1c2d4-0001-0001-0001-000000000001
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
-          $ref: "#/components/responses/NotFound"
+          description: You have no active booking for this slot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                detail:
+                  code: REGISTRATION_NOT_FOUND
+                  message: No active registration found for this slot
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
+  # ============================================================================
+  # REGISTRATIONS
+  # ============================================================================
   /api/v1/registrations:
     get:
       tags: [registrations]
-      summary: My registrations
+      summary: View all your exam bookings
+      description: |
+        **Requires login (any role).**
+
+        Returns all exam bookings for the currently logged-in student,
+        sorted newest first.
+
+        This is your personal booking history. You will see the registration
+        `id` here — keep it to submit answers later.
+
+        **Rate limit:** 100 requests per minute.
       security:
         - bearerAuth: []
       responses:
         "200":
-          description: List of registrations
+          description: Your exam bookings
           content:
             application/json:
               schema:
@@ -648,31 +1959,1275 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/Registration"
-                  count: { type: integer }
+                  count:
+                    type: integer
+              example:
+                data:
+                  - id: a3f1c2d4-0001-0001-0001-000000000001
+                    student_id: user-demo-0001
+                    slot_id: slot-001
+                    status: registered
+                    score: null
+                    grade: null
+                    registered_at: "2026-11-21T08:00:00"
+                count: 1
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
   /api/v1/registrations/{reg_id}:
     get:
       tags: [registrations]
-      summary: Get a single registration
+      summary: Get details of one specific booking
+      description: |
+        **Requires login.**
+
+        Returns the full details of one registration. Students can only view
+        their own bookings. Admins and instructors can view any booking.
+
+        **Rate limit:** 100 requests per minute.
       security:
         - bearerAuth: []
       parameters:
         - name: reg_id
           in: path
           required: true
-          schema: { type: string }
+          description: The registration ID (from your bookings list or the booking confirmation)
+          schema:
+            type: string
+          example: a3f1c2d4-0001-0001-0001-000000000001
       responses:
         "200":
-          description: Registration detail
+          description: Registration details
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Registration"
+              example:
+                id: a3f1c2d4-0001-0001-0001-000000000001
+                student_id: user-demo-0001
+                slot_id: slot-001
+                status: registered
+                score: null
+                grade: null
+                registered_at: "2026-11-21T08:00:00"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: You are trying to view another student's booking
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                detail:
+                  code: FORBIDDEN
+                  message: You can only view your own registrations
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  # ============================================================================
+  # EVALUATION — QUESTIONS
+  # ============================================================================
+  /api/v1/evaluation/exams/{exam_id}/questions:
+    post:
+      tags: [evaluation]
+      summary: Add a question to an exam
+      description: |
+        **Requires login as `instructor` or `admin`.**
+
+        Adds one question to the exam's question bank. Each question has a
+        display number (shown to the student) which must be unique within the exam.
+
+        **Question types:**
+        - `mcq` — multiple choice; you must provide at least 2 `options`
+        - `integer` — student enters a number
+        - `descriptive` — student writes free text; graded by keyword matching
+
+        After adding questions, set an answer key for each one using
+        `PUT /api/v1/evaluation/questions/{q_id}/answer-key`.
+
+        **Rate limit:** 60 requests per minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: exam_id
+          in: path
+          required: true
+          description: The exam to add this question to (e.g. `exam-001`)
+          schema:
+            type: string
+          example: exam-001
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [number, text, question_type]
+              properties:
+                number:
+                  type: integer
+                  minimum: 1
+                  description: Question number shown to the student (must be unique for this exam)
+                text:
+                  type: string
+                  minLength: 1
+                  description: The question text
+                question_type:
+                  type: string
+                  enum: [mcq, integer, descriptive]
+                  description: Type of question
+                options:
+                  type: array
+                  items:
+                    type: string
+                  description: Answer choices — required for `mcq`, omit for other types. Minimum 2 options.
+            examples:
+              MCQExample:
+                summary: Multiple choice question
+                value:
+                  number: 1
+                  text: What is the derivative of x²?
+                  question_type: mcq
+                  options: ["x", "2x", "x²", "2x²"]
+              IntegerExample:
+                summary: Integer answer question
+                value:
+                  number: 2
+                  text: How many sides does a hexagon have?
+                  question_type: integer
+              DescriptiveExample:
+                summary: Free-text question
+                value:
+                  number: 3
+                  text: Explain the process of photosynthesis.
+                  question_type: descriptive
+      responses:
+        "201":
+          description: Question added successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Question"
+              example:
+                id: q-uuid-0001
+                exam_id: exam-001
+                number: 1
+                text: What is the derivative of x²?
+                question_type: mcq
+                options: ["x", "2x", "x²", "2x²"]
+                has_answer_key: false
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Exam not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                detail:
+                  code: EXAM_NOT_FOUND
+                  message: Exam 'exam-999' not found
+        "409":
+          description: A question with this number already exists for this exam
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                detail:
+                  code: DUPLICATE_QUESTION_NUMBER
+                  message: Question number 1 already exists for this exam
+        "422":
+          description: MCQ submitted without enough options, or other validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                detail:
+                  code: INVALID_OPTIONS
+                  message: MCQ questions require at least 2 options
+
+    get:
+      tags: [evaluation]
+      summary: List all questions for an exam
+      description: |
+        **Requires login (any role).**
+
+        Returns all questions for an exam, ordered by question number.
+        Each question shows whether an answer key has been set.
+
+        **Rate limit:** 120 requests per minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: exam_id
+          in: path
+          required: true
+          description: The exam whose questions you want to list
+          schema:
+            type: string
+          example: exam-001
+      responses:
+        "200":
+          description: List of questions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Question"
+                  count:
+                    type: integer
+              example:
+                data:
+                  - id: q-uuid-0001
+                    exam_id: exam-001
+                    number: 1
+                    text: What is the derivative of x²?
+                    question_type: mcq
+                    options: ["x", "2x", "x²", "2x²"]
+                    has_answer_key: true
+                  - id: q-uuid-0002
+                    exam_id: exam-001
+                    number: 2
+                    text: How many sides does a hexagon have?
+                    question_type: integer
+                    options: null
+                    has_answer_key: false
+                count: 2
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/evaluation/exams/{exam_id}/questions/{q_id}:
+    get:
+      tags: [evaluation]
+      summary: Get one specific question
+      description: |
+        **Requires login (any role).**
+
+        Returns the details of a single question. Note: answer keys are
+        not included here — use the separate answer-key endpoint (instructor only).
+
+        **Rate limit:** 120 requests per minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: exam_id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: exam-001
+        - name: q_id
+          in: path
+          required: true
+          description: The question ID (from the questions list)
+          schema:
+            type: string
+          example: q-uuid-0001
+      responses:
+        "200":
+          description: Question details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Question"
+              example:
+                id: q-uuid-0001
+                exam_id: exam-001
+                number: 1
+                text: What is the derivative of x²?
+                question_type: mcq
+                options: ["x", "2x", "x²", "2x²"]
+                has_answer_key: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    delete:
+      tags: [evaluation]
+      summary: Remove a question from an exam
+      description: |
+        **Requires login as `instructor` or `admin`.**
+
+        Permanently deletes a question and its answer key (if set).
+        This cannot be undone.
+
+        **Rate limit:** 30 requests per minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: exam_id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: exam-001
+        - name: q_id
+          in: path
+          required: true
+          description: The question ID to delete
+          schema:
+            type: string
+          example: q-uuid-0001
+      responses:
+        "204":
+          description: Question deleted (no response body)
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  # ============================================================================
+  # EVALUATION — ANSWER KEYS
+  # ============================================================================
+  /api/v1/evaluation/questions/{q_id}/answer-key:
+    put:
+      tags: [evaluation]
+      summary: Set or update the correct answer for a question
+      description: |
+        **Requires login as `instructor` or `admin`.**
+
+        Sets the correct answer for a question. Can be called multiple times —
+        calling again replaces the previous answer key.
+
+        **Format of `correct_answer` by question type:**
+
+        | Type | Format | Example |
+        |---|---|---|
+        | `mcq` | Exact option string | `"2x"` |
+        | `integer` | Number as a string | `"6"` |
+        | `descriptive` | JSON array of keywords | `'["photosynthesis","chlorophyll","sunlight"]'` |
+
+        For descriptive questions, the marking engine checks how many of the
+        keywords appear in the student's answer. The marking policy controls
+        how many keywords are required for partial/full credit.
+
+        **Rate limit:** 60 requests per minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: q_id
+          in: path
+          required: true
+          description: The question ID to set the answer key for
+          schema:
+            type: string
+          example: q-uuid-0001
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [correct_answer]
+              properties:
+                correct_answer:
+                  type: string
+                  minLength: 1
+                  description: The correct answer (format depends on question type — see description above)
+                explanation:
+                  type: string
+                  description: Optional explanation shown to students after evaluation
+            examples:
+              MCQAnswer:
+                summary: Answer key for MCQ question
+                value:
+                  correct_answer: "2x"
+                  explanation: "By the power rule, d/dx(x²) = 2x."
+              IntegerAnswer:
+                summary: Answer key for integer question
+                value:
+                  correct_answer: "6"
+                  explanation: "A hexagon has 6 sides by definition."
+              DescriptiveAnswer:
+                summary: Answer key for descriptive question (keywords)
+                value:
+                  correct_answer: '["photosynthesis","chlorophyll","sunlight","carbon dioxide","oxygen"]'
+                  explanation: "A good answer should mention at least these 5 concepts."
+      responses:
+        "200":
+          description: Answer key set or updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnswerKey"
+              example:
+                id: ak-uuid-0001
+                question_id: q-uuid-0001
+                correct_answer: "2x"
+                explanation: "By the power rule, d/dx(x²) = 2x."
+                created_by: user-inst-0001
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    get:
+      tags: [evaluation]
+      summary: View the answer key for a question
+      description: |
+        **Requires login as `instructor` or `admin`.**
+
+        Returns the correct answer for a question. This endpoint is restricted
+        to instructors and admins — students cannot view answer keys.
+
+        **Rate limit:** 120 requests per minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: q_id
+          in: path
+          required: true
+          description: The question ID
+          schema:
+            type: string
+          example: q-uuid-0001
+      responses:
+        "200":
+          description: Answer key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnswerKey"
+              example:
+                id: ak-uuid-0001
+                question_id: q-uuid-0001
+                correct_answer: "2x"
+                explanation: "By the power rule, d/dx(x²) = 2x."
+                created_by: user-inst-0001
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: No answer key has been set for this question yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                detail:
+                  code: ANSWER_KEY_NOT_FOUND
+                  message: No answer key set for this question
+
+  # ============================================================================
+  # EVALUATION — MARKING POLICY
+  # ============================================================================
+  /api/v1/evaluation/exams/{exam_id}/marking-policy:
+    post:
+      tags: [evaluation]
+      summary: Create the marking rules for an exam
+      description: |
+        **Requires login as `instructor` or `admin`.**
+
+        Sets up how the exam will be scored. Each exam can have only one
+        marking policy. If one already exists, use `PUT` to update it.
+
+        **Common setups:**
+        - Standard +4/-1 (JEE-style): `marks_correct=4, marks_wrong=-1`
+        - No negative marking: `marks_correct=1, marks_wrong=0`
+        - 2.5 marks each, no penalty: `marks_correct=2.5, marks_wrong=0`
+
+        **Rate limit:** 30 requests per minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: exam_id
+          in: path
+          required: true
+          description: The exam to create the policy for
+          schema:
+            type: string
+          example: exam-001
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [marks_correct, marks_wrong]
+              properties:
+                marks_correct:
+                  type: number
+                  exclusiveMinimum: 0
+                  description: Marks given per correct answer (must be > 0)
+                marks_wrong:
+                  type: number
+                  maximum: 0
+                  description: Marks change per wrong answer (use negative for penalty, 0 for none)
+                marks_unattempted:
+                  type: number
+                  default: 0.0
+                  description: Marks change for skipped questions (usually 0)
+                partial_credit_threshold:
+                  type: number
+                  minimum: 0.0
+                  maximum: 1.0
+                  default: 0.5
+                  description: >
+                    For descriptive questions: fraction of keywords required
+                    for partial credit (0.5 = 50% of keywords)
+                partial_credit_ratio:
+                  type: number
+                  minimum: 0.0
+                  maximum: 1.0
+                  default: 0.5
+                  description: >
+                    For descriptive questions: fraction of `marks_correct`
+                    awarded as partial credit (0.5 = half marks)
+            examples:
+              JEEStyle:
+                summary: JEE-style +4/-1 marking
+                value:
+                  marks_correct: 4
+                  marks_wrong: -1
+                  marks_unattempted: 0
+              NoNegative:
+                summary: No negative marking
+                value:
+                  marks_correct: 1
+                  marks_wrong: 0
+                  marks_unattempted: 0
+      responses:
+        "201":
+          description: Marking policy created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarkingPolicy"
+              example:
+                id: mp-uuid-0001
+                exam_id: exam-001
+                marks_correct: 4.0
+                marks_wrong: -1.0
+                marks_unattempted: 0.0
+                partial_credit_threshold: 0.5
+                partial_credit_ratio: 0.5
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: A marking policy already exists for this exam — use PUT to update it
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                detail:
+                  code: POLICY_EXISTS
+                  message: Marking policy already exists; use PUT to update
+
+    get:
+      tags: [evaluation]
+      summary: View the marking rules for an exam
+      description: |
+        **Requires login (any role).**
+
+        Returns the scoring rules set for this exam.
+
+        **Rate limit:** 120 requests per minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: exam_id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: exam-001
+      responses:
+        "200":
+          description: Marking policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarkingPolicy"
+              example:
+                id: mp-uuid-0001
+                exam_id: exam-001
+                marks_correct: 4.0
+                marks_wrong: -1.0
+                marks_unattempted: 0.0
+                partial_credit_threshold: 0.5
+                partial_credit_ratio: 0.5
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: No marking policy has been created for this exam yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                detail:
+                  code: POLICY_NOT_FOUND
+                  message: No marking policy set for this exam
+
+    put:
+      tags: [evaluation]
+      summary: Update the marking rules for an exam
+      description: |
+        **Requires login as `instructor` or `admin`.**
+
+        Replaces the existing marking policy with new values. All fields are
+        required (this is a full replacement, not a partial update).
+
+        **Rate limit:** 30 requests per minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: exam_id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: exam-001
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [marks_correct, marks_wrong]
+              properties:
+                marks_correct: { type: number, exclusiveMinimum: 0 }
+                marks_wrong: { type: number, maximum: 0 }
+                marks_unattempted: { type: number, default: 0.0 }
+                partial_credit_threshold: { type: number, minimum: 0.0, maximum: 1.0, default: 0.5 }
+                partial_credit_ratio: { type: number, minimum: 0.0, maximum: 1.0, default: 0.5 }
+            example:
+              marks_correct: 2
+              marks_wrong: 0
+              marks_unattempted: 0
+      responses:
+        "200":
+          description: Marking policy updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarkingPolicy"
+              example:
+                id: mp-uuid-0001
+                exam_id: exam-001
+                marks_correct: 2.0
+                marks_wrong: 0.0
+                marks_unattempted: 0.0
+                partial_credit_threshold: 0.5
+                partial_credit_ratio: 0.5
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: No marking policy exists yet — use POST to create one first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                detail:
+                  code: POLICY_NOT_FOUND
+                  message: No marking policy found; use POST to create
+
+  # ============================================================================
+  # EVALUATION — TRIGGER
+  # ============================================================================
+  /api/v1/evaluation/scripts/{script_id}/evaluate:
+    post:
+      tags: [evaluation]
+      summary: Run the marking engine on a student's answer script
+      description: |
+        **Requires login as `instructor` or `admin`.**
+
+        Triggers automated scoring for one student's submitted answer script.
+        The engine:
+        1. Loads all questions and their answer keys
+        2. Applies the exam's marking policy (marks per correct/wrong answer)
+        3. Calculates total score and assigns a grade
+        4. Saves the score and grade to the registration
+
+        Once evaluated, the script is locked — re-submission by the student
+        is blocked and calling this endpoint again returns 409.
+
+        **Before calling this you need:**
+        - All questions added with answer keys set
+        - A marking policy created for the exam
+        - The student to have submitted their answers
+
+        The `script_id` is found in the `AnswerScript` returned by
+        `GET /api/v1/submissions/{registration_id}`.
+
+        **Rate limit:** 30 requests per minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: script_id
+          in: path
+          required: true
+          description: The ID of the answer script to evaluate (from the submissions endpoint)
+          schema:
+            type: string
+          example: script-uuid-0001
+      responses:
+        "200":
+          description: Evaluation complete — full score breakdown returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvaluationResult"
+              example:
+                script_id: script-uuid-0001
+                registration_id: a3f1c2d4-0001-0001-0001-000000000001
+                total_score: 72.0
+                max_score: 100.0
+                percentage: 72.0
+                grade: B
+                question_results:
+                  - question_id: q-uuid-0001
+                    question_number: 1
+                    question_type: mcq
+                    student_answer: "2x"
+                    correct_answer: "2x"
+                    marks_awarded: 4.0
+                    verdict: correct
+                  - question_id: q-uuid-0002
+                    question_number: 2
+                    question_type: integer
+                    student_answer: "5"
+                    correct_answer: "6"
+                    marks_awarded: -1.0
+                    verdict: wrong
+                  - question_id: q-uuid-0003
+                    question_number: 3
+                    question_type: integer
+                    student_answer: null
+                    correct_answer: "42"
+                    marks_awarded: 0.0
+                    verdict: unattempted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Script not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                detail:
+                  code: SCRIPT_NOT_FOUND
+                  message: Script 'script-xyz' not found
+        "409":
+          description: This script has already been evaluated — cannot evaluate twice
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                detail:
+                  code: ALREADY_EVALUATED
+                  message: Script has already been evaluated
+        "422":
+          description: Marking policy has not been set for this exam yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                detail:
+                  code: POLICY_NOT_FOUND
+                  message: No marking policy set for this exam
+
+  # ============================================================================
+  # SUBMISSIONS
+  # ============================================================================
+  /api/v1/submissions/{registration_id}:
+    post:
+      tags: [submissions]
+      summary: Submit your answers for an exam
+      description: |
+        **Requires login (any role, but only the registered student or admin can submit).**
+
+        Upload your answers for an exam you have registered for.
+
+        - You can submit as many times as you want **before** an instructor evaluates your script.
+          Each submission **replaces** the previous one completely.
+        - Once an instructor evaluates your script, re-submission is blocked (409).
+        - Submitting for a cancelled registration is blocked (409).
+        - Answers for question IDs that do not belong to this exam are rejected (422).
+        - If you submit the same `question_id` twice, the last one is kept.
+        - Leave `answer` as `null` or omit it to mark a question as unattempted.
+
+        **Rate limit:** 10 requests per minute (intentionally low — do not spam).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: registration_id
+          in: path
+          required: true
+          description: Your registration ID for this exam (from `GET /api/v1/registrations`)
+          schema:
+            type: string
+          example: a3f1c2d4-0001-0001-0001-000000000001
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [answers]
+              properties:
+                answers:
+                  type: array
+                  description: >
+                    Your answers. Include one entry per question.
+                    Questions not included are treated as unattempted.
+                  items:
+                    type: object
+                    required: [question_id]
+                    properties:
+                      question_id:
+                        type: string
+                        description: The ID of the question you are answering
+                      answer:
+                        type: string
+                        nullable: true
+                        description: >
+                          Your answer. Use `null` or omit this field to skip a question.
+                          For MCQ: the exact option text. For integer: the number as a string.
+                          For descriptive: your free-text answer.
+            example:
+              answers:
+                - question_id: q-uuid-0001
+                  answer: "2x"
+                - question_id: q-uuid-0002
+                  answer: "6"
+                - question_id: q-uuid-0003
+                  answer: "Photosynthesis is the process by which plants use sunlight, water and carbon dioxide to produce oxygen and energy in the form of glucose."
+                - question_id: q-uuid-0004
+                  answer: null
+      responses:
+        "200":
+          description: Answers submitted (or replaced) successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnswerScript"
+              example:
+                id: script-uuid-0001
+                registration_id: a3f1c2d4-0001-0001-0001-000000000001
+                submitted_at: "2027-03-01T11:55:00"
+                evaluated: false
+                evaluated_at: null
+                answer_count: 4
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: You are trying to submit for another student's registration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                detail:
+                  code: FORBIDDEN
+                  message: You can only access your own submissions
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Script already evaluated or registration is cancelled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                AlreadyEvaluated:
+                  summary: Too late — script already marked
+                  value:
+                    detail:
+                      code: ALREADY_EVALUATED
+                      message: Script has already been evaluated; re-submission is not allowed
+                Cancelled:
+                  summary: Registration was cancelled
+                  value:
+                    detail:
+                      code: REGISTRATION_CANCELLED
+                      message: Cannot submit for a cancelled registration
+        "422":
+          description: Question IDs do not belong to this exam, or exam has no questions yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                NoQuestions:
+                  summary: Instructor has not added questions yet
+                  value:
+                    detail:
+                      code: NO_QUESTIONS
+                      message: This exam has no questions set yet
+                InvalidIds:
+                  summary: One or more question IDs are wrong
+                  value:
+                    detail:
+                      code: INVALID_QUESTION_IDS
+                      message: "Questions not part of this exam: ['q-wrong-id']"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+    get:
+      tags: [submissions]
+      summary: Check whether you have submitted answers for a registration
+      description: |
+        **Requires login.**
+
+        Returns the metadata for your submission — whether it has been
+        evaluated, when you submitted, and how many questions you answered.
+
+        Does **not** return the individual answers — use the `/answers` endpoint for that.
+
+        Students can only view their own submissions. Admins and instructors
+        can view any submission.
+
+        **Rate limit:** 60 requests per minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: registration_id
+          in: path
+          required: true
+          description: Your registration ID
+          schema:
+            type: string
+          example: a3f1c2d4-0001-0001-0001-000000000001
+      responses:
+        "200":
+          description: Submission metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnswerScript"
+              example:
+                id: script-uuid-0001
+                registration_id: a3f1c2d4-0001-0001-0001-000000000001
+                submitted_at: "2027-03-01T11:55:00"
+                evaluated: false
+                evaluated_at: null
+                answer_count: 4
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: No submission has been made for this registration yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                detail:
+                  code: SCRIPT_NOT_FOUND
+                  message: No submission found for this registration
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /api/v1/submissions/{registration_id}/answers:
+    get:
+      tags: [submissions]
+      summary: View all your individual answers in a submission
+      description: |
+        **Requires login.**
+
+        Returns every answer in your submission, ordered by question number.
+        This shows what you answered for each question — useful for reviewing
+        your submission before evaluation.
+
+        Students can only view their own answers. Admins and instructors can
+        view any student's answers.
+
+        **Rate limit:** 60 requests per minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: registration_id
+          in: path
+          required: true
+          description: Your registration ID
+          schema:
+            type: string
+          example: a3f1c2d4-0001-0001-0001-000000000001
+      responses:
+        "200":
+          description: List of your answers, in question-number order
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AnswerItem"
+                  count:
+                    type: integer
+              example:
+                data:
+                  - question_id: q-uuid-0001
+                    question_number: 1
+                    answer: "2x"
+                  - question_id: q-uuid-0002
+                    question_number: 2
+                    answer: "6"
+                  - question_id: q-uuid-0003
+                    question_number: 3
+                    answer: "Photosynthesis is the process by which plants use sunlight..."
+                  - question_id: q-uuid-0004
+                    question_number: 4
+                    answer: null
+                count: 4
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  # ============================================================================
+  # RESULTS
+  # ============================================================================
+  /api/v1/results/me:
+    get:
+      tags: [results]
+      summary: View all your exam scores
+      description: |
+        **Requires login (any role).**
+
+        Returns all your completed and evaluated exam registrations with
+        scores and grades. Only shows registrations that have been evaluated.
+
+        Results are sorted newest first.
+
+        **Rate limit:** 60 requests per minute.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Your evaluated exam results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ResultSummary"
+                  count:
+                    type: integer
+              example:
+                data:
+                  - registration_id: a3f1c2d4-0001-0001-0001-000000000001
+                    slot_id: slot-001
+                    status: completed
+                    score: 72.0
+                    grade: B
+                    registered_at: "2026-11-21T08:00:00"
+                count: 1
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /api/v1/results/registrations/{reg_id}:
+    get:
+      tags: [results]
+      summary: View detailed result for one registration
+      description: |
+        **Requires login.**
+
+        Returns your full result for one exam — total score, grade, and a
+        question-by-question breakdown showing what you answered vs. what was correct.
+
+        The registration must have been evaluated by an instructor first.
+        If it has not been evaluated yet, this returns 404 with code `NOT_EVALUATED`.
+
+        Students can only view their own results. Admins and instructors can
+        view any student's result.
+
+        **Rate limit:** 60 requests per minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: reg_id
+          in: path
+          required: true
+          description: The registration ID to view the result for
+          schema:
+            type: string
+          example: a3f1c2d4-0001-0001-0001-000000000001
+      responses:
+        "200":
+          description: Detailed result with per-question breakdown
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResultDetail"
+              example:
+                registration_id: a3f1c2d4-0001-0001-0001-000000000001
+                exam_id: exam-001
+                exam_title: Class 12 Mathematics Board Exam
+                slot_id: slot-001
+                score: 72.0
+                grade: B
+                status: completed
+                evaluated_at: "2027-03-02T14:00:00"
+                questions:
+                  - question_number: 1
+                    question_text: What is the derivative of x²?
+                    question_type: mcq
+                    student_answer: "2x"
+                    correct_answer: "2x"
+                  - question_number: 2
+                    question_text: How many sides does a hexagon have?
+                    question_type: integer
+                    student_answer: "5"
+                    correct_answer: "6"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: You are trying to view another student's result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                detail:
+                  code: FORBIDDEN
+                  message: You can only view your own results
+        "404":
+          description: Registration not found, or result not available yet (not evaluated)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                NotFound:
+                  summary: Registration does not exist
+                  value:
+                    detail:
+                      code: REGISTRATION_NOT_FOUND
+                      message: Registration not found
+                NotEvaluated:
+                  summary: Exam not marked yet
+                  value:
+                    detail:
+                      code: NOT_EVALUATED
+                      message: This registration has not been evaluated yet
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /api/v1/results/exams/{exam_id}:
+    get:
+      tags: [results]
+      summary: View the leaderboard for an exam
+      description: |
+        **Requires login as `instructor` or `admin`.**
+
+        Returns all evaluated results for a specific exam, sorted by score
+        from highest to lowest (rank 1 = top scorer).
+
+        Only includes registrations that have been evaluated. Students who
+        have not submitted or whose scripts have not been evaluated yet
+        will not appear here.
+
+        **Rate limit:** 30 requests per minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: exam_id
+          in: path
+          required: true
+          description: The exam to get the leaderboard for (e.g. `exam-001`)
+          schema:
+            type: string
+          example: exam-001
+      responses:
+        "200":
+          description: Leaderboard sorted by score, highest first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  exam_id:
+                    type: string
+                    example: exam-001
+                  exam_title:
+                    type: string
+                    example: Class 12 Mathematics Board Exam
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/LeaderboardEntry"
+                  count:
+                    type: integer
+                    description: Number of evaluated results
+              example:
+                exam_id: exam-001
+                exam_title: Class 12 Mathematics Board Exam
+                data:
+                  - rank: 1
+                    student_id: user-demo-0001
+                    student_name: Demo Student
+                    slot_id: slot-001
+                    score: 88.0
+                    grade: A
+                  - rank: 2
+                    student_id: user-demo-0002
+                    student_name: Priya Sharma
+                    slot_id: slot-002
+                    score: 72.0
+                    grade: B
+                count: 2
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: No exam found with that ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                detail:
+                  code: EXAM_NOT_FOUND
+                  message: Exam 'exam-999' not found
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
