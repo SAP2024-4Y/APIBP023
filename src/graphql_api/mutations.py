@@ -80,8 +80,13 @@ async def resolve_register_for_slot(
             ),
         )
 
-    reg = Registration(student_id=student_id, slot_id=slot_id, status="registered")
-    db.add(reg)
+    # Reactivate cancelled row to avoid UNIQUE(student_id, slot_id) violation.
+    if existing:
+        existing.status = "registered"
+        reg = existing
+    else:
+        reg = Registration(student_id=student_id, slot_id=slot_id, status="registered")
+        db.add(reg)
     slot.available_seats -= 1
     await db.flush()
     await db.refresh(reg)
