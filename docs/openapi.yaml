@@ -45,7 +45,7 @@ info:
 
     1. **Log in** → `POST /api/v1/auth/token` → copy the token → click Authorize above
     2. **Browse exams** → `GET /api/v1/exams` (filter by subject, fee range, status)
-    3. **Find a nearby centre** → `GET /api/v1/exam-centers/nearby?latitude=28.61&longitude=77.21&radius_km=50`
+    3. **Find a nearby centre** → `GET /api/v1/exam-centers/nearby` with your `latitude`, `longitude`, and `radius_km`
     4. **See available slots** → `GET /api/v1/exam-slots?exam_id=exam-001`
     5. **Book a seat** → `POST /api/v1/exam-slots/slot-001/register`
     6. **Check your bookings** → `GET /api/v1/registrations`
@@ -100,6 +100,33 @@ tags:
       **See time slots and book your seat.**
       Each slot links one exam to one centre at a specific date/time.
       Booking checks for seat availability and prevents double-booking.
+
+      **Data model — how exams, slots, and registrations relate:**
+
+      - An **Exam** is the event definition (title, subject, marks, fee). It has no date or location by itself.
+      - An **ExamSlot** is one specific sitting of that exam — at one `ExamCenter`, on one date/time window, with its own seat capacity.
+        One exam can have **multiple slots** at different centres or times so students can pick the most convenient option.
+      - A student registers for a **slot** (not for an exam directly). A `Registration` links a student to one slot.
+
+      **Conflict rules (what the booking endpoint enforces):**
+
+      | Rule | Error code | HTTP status |
+      |---|---|---|
+      | Slot already has 0 seats left | `SLOT_FULL` | 409 |
+      | Student already registered for this exact slot | `ALREADY_REGISTERED` | 409 |
+      | Student has another booking that overlaps in time | `SLOT_CONFLICT` | 409 |
+      | Exam is cancelled | `EXAM_CANCELLED` | 422 |
+
+      There is **no** "one registration per exam" rule. A student can register for two slots of the same exam
+      as long as they do not overlap in time. The system only prevents time-overlap and duplicate-slot conflicts.
+
+      **Full exam lifecycle (instructor → student):**
+      1. Instructor creates an exam → adds questions → sets answer keys → sets marking policy
+      2. Slots are created linking the exam to centres with dates and seat counts
+      3. Students browse slots, pick one, and register
+      4. Students submit their answers before the slot ends
+      5. Instructor triggers evaluation per script
+      6. Results are published — students view scores, instructor views the leaderboard
   - name: registrations
     description: |
       **View your exam bookings.**
@@ -137,11 +164,12 @@ components:
   schemas:
 
     # ── Error shapes ──────────────────────────────────────────────────────────
-    Error:
+    ErrorBody:
       type: object
       description: >
-        Every error response has a `code` (a short machine-readable label) and
-        a `message` (a human-readable explanation).
+        The inner error detail object. Every error response body contains a `code`
+        (a short label like `SLOT_FULL` or `NOT_FOUND`) and a `message` (a plain
+        English sentence saying what went wrong).
       required: [code, message]
       properties:
         code:
@@ -153,13 +181,16 @@ components:
           description: Plain English explanation of what went wrong
           example: No available seats in this slot
 
-    ErrorEnvelope:
+    ErrorResponse:
       type: object
-      description: All error responses are wrapped in a `detail` object.
+      description: >
+        The standard shape of every error response in this API.
+        The JSON body is always `{"detail": {"code": "...", "message": "..."}}`.
+        The `code` is a short machine-readable label; the `message` is a plain English explanation.
       required: [detail]
       properties:
         detail:
-          $ref: "#/components/schemas/Error"
+          $ref: "#/components/schemas/ErrorBody"
 
     # ── Auth ──────────────────────────────────────────────────────────────────
     TokenRequest:
@@ -857,7 +888,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/ErrorEnvelope"
+            $ref: "#/components/schemas/ErrorResponse"
           examples:
             MissingToken:
               summary: No token was sent
@@ -880,7 +911,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/ErrorEnvelope"
+            $ref: "#/components/schemas/ErrorResponse"
           example:
             detail:
               code: FORBIDDEN
@@ -893,7 +924,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/ErrorEnvelope"
+            $ref: "#/components/schemas/ErrorResponse"
 
     UnprocessableEntity:
       description: |
@@ -902,7 +933,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/ErrorEnvelope"
+            $ref: "#/components/schemas/ErrorResponse"
 
     TooManyRequests:
       description: |
@@ -1024,7 +1055,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
+                $ref: "#/components/schemas/ErrorResponse"
               example:
                 detail:
                   code: INVALID_CREDENTIALS
@@ -1280,7 +1311,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
+                $ref: "#/components/schemas/ErrorResponse"
               example:
                 detail:
                   code: MISSING_FIELDS
@@ -1330,7 +1361,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
+                $ref: "#/components/schemas/ErrorResponse"
               example:
                 detail:
                   code: EXAM_NOT_FOUND
@@ -1411,32 +1442,65 @@ paths:
         Each result includes a `distance_km` field showing how far it is from
         your search point.
 
-        **How to find your coordinates:** Open Google Maps, right-click your
-        location, and copy the latitude and longitude shown.
+        **How to get the user's location:**
 
-        **Example:** Search near Delhi (lat=28.6139, lon=77.2090) with a 100 km radius
-        to find the Delhi centre.
+        The calling app obtains the user's GPS coordinates and passes them here:
+
+        - **Browser (JavaScript):**
+          ```js
+          navigator.geolocation.getCurrentPosition(pos => {
+            const { latitude, longitude } = pos.coords;
+            fetch(`/api/v1/exam-centers/nearby?latitude=${latitude}&longitude=${longitude}&radius_km=50`);
+          });
+          ```
+        - **Mobile apps:** use the platform Location API (Android / iOS).
+        - **Swagger UI / manual testing:** enter coordinates from this table:
+
+          | City | latitude | longitude |
+          |---|---|---|
+          | Delhi | `28.6139` | `77.2090` |
+          | Mumbai | `18.9220` | `72.8236` |
+          | Bangalore | `12.9716` | `77.5946` |
+          | Chennai | `13.0827` | `80.2707` |
+          | Kolkata | `22.5726` | `88.3639` |
+
+        For example, a student in Bangalore would call:
+        `GET /api/v1/exam-centers/nearby?latitude=12.9716&longitude=77.5946&radius_km=50`
+
+        This returns all seeded centres within 50 km, sorted nearest first.
 
         **Rate limit:** 100 requests per minute.
       parameters:
         - name: latitude
           in: query
           required: true
-          description: Your latitude in decimal degrees (e.g. 28.6139 for New Delhi)
+          description: |
+            Your latitude in decimal degrees. **Replace this with your own location.**
+
+            How to find it: open Google Maps, right-click your location, copy the
+            first number shown (e.g. `12.9716` for Bangalore, `28.6139` for Delhi).
+
+            Range: –90 to +90 (India is between ~8 and ~37).
           schema:
             type: number
             minimum: -90
             maximum: 90
-          example: 28.6139
+          example: 12.9716
         - name: longitude
           in: query
           required: true
-          description: Your longitude in decimal degrees (e.g. 77.2090 for New Delhi)
+          description: |
+            Your longitude in decimal degrees. **Replace this with your own location.**
+
+            How to find it: open Google Maps, right-click your location, copy the
+            second number shown (e.g. `77.5946` for Bangalore, `77.2090` for Delhi).
+
+            Range: –180 to +180 (India is between ~68 and ~97).
           schema:
             type: number
             minimum: -180
             maximum: 180
-          example: 77.2090
+          example: 77.5946
         - name: radius_km
           in: query
           required: false
@@ -1475,6 +1539,17 @@ paths:
                     distance_km: 0.0
                     created_at: "2026-01-01T00:00:00"
                 count: 1
+        "422":
+          description: |
+            `latitude` or `longitude` query parameter is missing or not a valid number.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                detail:
+                  code: MISSING_REQUIRED_PARAMS
+                  message: "latitude and longitude are required query parameters"
         "429":
           $ref: "#/components/responses/TooManyRequests"
 
@@ -1567,7 +1642,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
+                $ref: "#/components/schemas/ErrorResponse"
               example:
                 detail:
                   code: INVALID_COORDINATES
@@ -1616,7 +1691,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
+                $ref: "#/components/schemas/ErrorResponse"
               example:
                 detail:
                   code: CENTER_NOT_FOUND
@@ -1723,7 +1798,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
+                $ref: "#/components/schemas/ErrorResponse"
               example:
                 detail:
                   code: INVALID_DATE_RANGE
@@ -1769,7 +1844,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
+                $ref: "#/components/schemas/ErrorResponse"
               example:
                 detail:
                   code: SLOT_NOT_FOUND
@@ -1828,7 +1903,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
+                $ref: "#/components/schemas/ErrorResponse"
               example:
                 detail:
                   code: SLOT_NOT_FOUND
@@ -1842,7 +1917,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
+                $ref: "#/components/schemas/ErrorResponse"
               examples:
                 SlotFull:
                   summary: No seats left
@@ -1868,7 +1943,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
+                $ref: "#/components/schemas/ErrorResponse"
               example:
                 detail:
                   code: EXAM_CANCELLED
@@ -1920,7 +1995,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
+                $ref: "#/components/schemas/ErrorResponse"
               example:
                 detail:
                   code: REGISTRATION_NOT_FOUND
@@ -2019,13 +2094,21 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
+                $ref: "#/components/schemas/ErrorResponse"
               example:
                 detail:
                   code: FORBIDDEN
                   message: You can only view your own registrations
         "404":
-          $ref: "#/components/responses/NotFound"
+          description: No registration found with that ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                detail:
+                  code: REGISTRATION_NOT_FOUND
+                  message: Registration not found
         "429":
           $ref: "#/components/responses/TooManyRequests"
 
@@ -2130,7 +2213,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
+                $ref: "#/components/schemas/ErrorResponse"
               example:
                 detail:
                   code: EXAM_NOT_FOUND
@@ -2140,21 +2223,35 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
+                $ref: "#/components/schemas/ErrorResponse"
               example:
                 detail:
                   code: DUPLICATE_QUESTION_NUMBER
                   message: Question number 1 already exists for this exam
         "422":
-          description: MCQ submitted without enough options, or other validation error
+          description: |
+            Possible errors:
+            - `INVALID_OPTIONS` — MCQ question submitted with fewer than 2 options
+            - `MISSING_FIELDS` — `number`, `text`, or `question_type` is missing
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
-              example:
-                detail:
-                  code: INVALID_OPTIONS
-                  message: MCQ questions require at least 2 options
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                InvalidOptions:
+                  summary: MCQ submitted with fewer than 2 options
+                  value:
+                    detail:
+                      code: INVALID_OPTIONS
+                      message: MCQ questions require at least 2 options
+                MissingFields:
+                  summary: Required field missing from request body
+                  value:
+                    detail:
+                      code: MISSING_FIELDS
+                      message: "Missing: question_type"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
     get:
       tags: [evaluation]
@@ -2210,7 +2307,17 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
-          $ref: "#/components/responses/NotFound"
+          description: No exam found with that ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                detail:
+                  code: EXAM_NOT_FOUND
+                  message: Exam 'exam-999' not found
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
   /api/v1/evaluation/exams/{exam_id}/questions/{q_id}:
     get:
@@ -2257,7 +2364,17 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
-          $ref: "#/components/responses/NotFound"
+          description: No question found with that ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                detail:
+                  code: QUESTION_NOT_FOUND
+                  message: Question 'q-uuid-9999' not found
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
     delete:
       tags: [evaluation]
@@ -2293,7 +2410,17 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
-          $ref: "#/components/responses/NotFound"
+          description: No question found with that ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                detail:
+                  code: QUESTION_NOT_FOUND
+                  message: Question 'q-uuid-9999' not found
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
   # ============================================================================
   # EVALUATION — ANSWER KEYS
@@ -2380,7 +2507,27 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
-          $ref: "#/components/responses/NotFound"
+          description: No question found with that ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                detail:
+                  code: QUESTION_NOT_FOUND
+                  message: Question 'q-uuid-9999' not found
+        "422":
+          description: "`correct_answer` is empty or missing"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                detail:
+                  code: MISSING_FIELDS
+                  message: correct_answer cannot be empty
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
     get:
       tags: [evaluation]
@@ -2424,11 +2571,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
+                $ref: "#/components/schemas/ErrorResponse"
               example:
                 detail:
                   code: ANSWER_KEY_NOT_FOUND
                   message: No answer key set for this question
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
   # ============================================================================
   # EVALUATION — MARKING POLICY
@@ -2528,17 +2677,27 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
-          $ref: "#/components/responses/NotFound"
+          description: No exam found with that ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                detail:
+                  code: EXAM_NOT_FOUND
+                  message: Exam 'exam-999' not found
         "409":
           description: A marking policy already exists for this exam — use PUT to update it
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
+                $ref: "#/components/schemas/ErrorResponse"
               example:
                 detail:
                   code: POLICY_EXISTS
                   message: Marking policy already exists; use PUT to update
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
     get:
       tags: [evaluation]
@@ -2580,11 +2739,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
+                $ref: "#/components/schemas/ErrorResponse"
               example:
                 detail:
                   code: POLICY_NOT_FOUND
                   message: No marking policy set for this exam
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
     put:
       tags: [evaluation]
@@ -2646,11 +2807,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
+                $ref: "#/components/schemas/ErrorResponse"
               example:
                 detail:
                   code: POLICY_NOT_FOUND
                   message: No marking policy found; use POST to create
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
   # ============================================================================
   # EVALUATION — TRIGGER
@@ -2736,7 +2899,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
+                $ref: "#/components/schemas/ErrorResponse"
               example:
                 detail:
                   code: SCRIPT_NOT_FOUND
@@ -2746,7 +2909,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
+                $ref: "#/components/schemas/ErrorResponse"
               example:
                 detail:
                   code: ALREADY_EVALUATED
@@ -2756,11 +2919,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
+                $ref: "#/components/schemas/ErrorResponse"
               example:
                 detail:
                   code: POLICY_NOT_FOUND
                   message: No marking policy set for this exam
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
   # ============================================================================
   # SUBMISSIONS
@@ -2851,19 +3016,27 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
+                $ref: "#/components/schemas/ErrorResponse"
               example:
                 detail:
                   code: FORBIDDEN
                   message: You can only access your own submissions
         "404":
-          $ref: "#/components/responses/NotFound"
+          description: No registration found with that ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                detail:
+                  code: REGISTRATION_NOT_FOUND
+                  message: Registration not found
         "409":
           description: Script already evaluated or registration is cancelled
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
+                $ref: "#/components/schemas/ErrorResponse"
               examples:
                 AlreadyEvaluated:
                   summary: Too late — script already marked
@@ -2882,7 +3055,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
+                $ref: "#/components/schemas/ErrorResponse"
               examples:
                 NoQuestions:
                   summary: Instructor has not added questions yet
@@ -2947,7 +3120,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
+                $ref: "#/components/schemas/ErrorResponse"
               example:
                 detail:
                   code: SCRIPT_NOT_FOUND
@@ -3014,7 +3187,15 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
-          $ref: "#/components/responses/NotFound"
+          description: No submission has been made for this registration yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                detail:
+                  code: SCRIPT_NOT_FOUND
+                  message: No submission found for this registration
         "429":
           $ref: "#/components/responses/TooManyRequests"
 
@@ -3125,7 +3306,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
+                $ref: "#/components/schemas/ErrorResponse"
               example:
                 detail:
                   code: FORBIDDEN
@@ -3135,7 +3316,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
+                $ref: "#/components/schemas/ErrorResponse"
               examples:
                 NotFound:
                   summary: Registration does not exist
@@ -3224,7 +3405,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
+                $ref: "#/components/schemas/ErrorResponse"
               example:
                 detail:
                   code: EXAM_NOT_FOUND
