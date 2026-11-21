@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import create_access_token, verify_password
+from ..helpers.slots import check_slot_overlap
 from ..models import Exam, ExamSlot, Registration, User
 from .types import AuthPayload, GraphQLError, RegistrationResult, RegistrationType
 
@@ -68,19 +69,8 @@ async def resolve_register_for_slot(
             error=GraphQLError(code="SLOT_FULL", message="No available seats"),
         )
 
-    # Overlap check
-    overlap = (
-        await db.execute(
-            select(Registration)
-            .join(ExamSlot, Registration.slot_id == ExamSlot.id)
-            .where(
-                Registration.student_id == student_id,
-                Registration.status.notin_(["cancelled"]),
-                ExamSlot.starts_at < slot.ends_at,
-                ExamSlot.ends_at > slot.starts_at,
-            )
-        )
-    ).scalar_one_or_none()
+    # Overlap check (shared helper)
+    overlap = await check_slot_overlap(db, student_id, slot)
     if overlap:
         return RegistrationResult(
             registration=None,
