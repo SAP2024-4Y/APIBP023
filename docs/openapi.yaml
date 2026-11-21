@@ -510,11 +510,10 @@ components:
           type: string
           description: |
             Current booking status:
-            - `registered` — booked, waiting for confirmation
-            - `confirmed` — booking confirmed by admin
-            - `cancelled` — booking was cancelled
-            - `completed` — exam taken, result available
-          enum: [registered, confirmed, cancelled, completed]
+            - `registered` — booked and active
+            - `cancelled` — booking was cancelled (via DELETE /register)
+            - `completed` — exam evaluated; score and grade are now available
+          enum: [registered, cancelled, completed]
           example: registered
         score:
           type: number
