@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import get_current_user
 from ..database import get_db
+from ..helpers.slots import check_slot_overlap
 from ..middleware.rate_limit import limiter
 from ..models import Exam, ExamSlot, Registration, User
 
@@ -53,25 +54,6 @@ def _reg_out(r: Registration) -> dict:
 # ---------------------------------------------------------------------------
 # Conflict-detection helpers
 # ---------------------------------------------------------------------------
-
-async def _check_overlap(
-    db: AsyncSession,
-    student_id: str,
-    new_slot: ExamSlot,
-) -> Optional[Registration]:
-    """Return an existing active registration that overlaps with new_slot's time window."""
-    result = await db.execute(
-        select(Registration)
-        .join(ExamSlot, Registration.slot_id == ExamSlot.id)
-        .where(
-            Registration.student_id == student_id,
-            Registration.status.notin_(["cancelled"]),
-            ExamSlot.starts_at < new_slot.ends_at,
-            ExamSlot.ends_at > new_slot.starts_at,
-        )
-    )
-    return result.scalar_one_or_none()
-
 
 async def _existing_registration(
     db: AsyncSession, student_id: str, slot_id: str
@@ -183,7 +165,7 @@ async def register_for_slot(
         )
 
     # 5. Scheduling-conflict check (overlapping time windows)
-    conflict = await _check_overlap(db, current_user.id, slot)
+    conflict = await check_slot_overlap(db, current_user.id, slot)
     if conflict:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
