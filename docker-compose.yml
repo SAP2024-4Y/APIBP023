@@ -7,7 +7,7 @@ services:
       - ./data:/app/data
     environment:
       - DATABASE_URL=sqlite+aiosqlite:///./data/exam_eval.db
-      - SECRET_KEY=exam-eval-super-secret-key-change-in-prod-2024
+      - SECRET_KEY=${SECRET_KEY:-exam-eval-super-secret-key-change-in-prod-2024}
       - PORT=8080
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
