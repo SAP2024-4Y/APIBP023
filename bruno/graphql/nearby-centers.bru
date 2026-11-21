@@ -1,0 +1,22 @@
+meta {
+  name: GraphQL Nearby Centers (Bangalore)
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{base_url}}/graphql
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "query": "{ nearbyExamCenters(latitude: 12.9716, longitude: 77.5946, radiusKm: 50) { id name city distanceKm } }"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.nearbyExamCenters: isDefined
+}

@@ -16,3 +16,37 @@ services:
       retries: 12
       start_period: 30s
     restart: on-failure
+
+# ── PostgreSQL migration guide ─────────────────────────────────────────────────
+# The app currently uses SQLite (fine for development and demos).
+# For production, switch to PostgreSQL for concurrent writes and connection pooling:
+#
+# 1. Add asyncpg to requirements.txt:  asyncpg==0.29.0
+#
+# 2. Add this service (alongside `api`):
+#
+#   db:
+#     image: postgres:16-alpine
+#     environment:
+#       POSTGRES_DB: examdb
+#       POSTGRES_USER: exam
+#       POSTGRES_PASSWORD: exam_password
+#     volumes:
+#       - pgdata:/var/lib/postgresql/data
+#     healthcheck:
+#       test: ["CMD-SHELL", "pg_isready -U exam"]
+#       interval: 5s
+#       retries: 5
+#
+# 3. Update the api service environment:
+#       DATABASE_URL: postgresql+asyncpg://exam:exam_password@db:5432/examdb
+#
+# 4. Add depends_on to the api service:
+#       depends_on:
+#         db:
+#           condition: service_healthy
+#
+# 5. Add a named volume at the bottom:
+#
+# volumes:
+#   pgdata:

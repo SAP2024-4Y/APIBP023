@@ -1,0 +1,26 @@
+meta {
+  name: GraphQL My Registrations
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{base_url}}/graphql
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{student_token}}
+}
+
+body:json {
+  {
+    "query": "{ myRegistrations { id status slotId } }"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.myRegistrations: isDefined
+}
