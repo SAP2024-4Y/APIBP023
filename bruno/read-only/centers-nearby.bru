@@ -4,21 +4,23 @@ meta {
   seq: 3
 }
 
-# Find exam centers within 50 km of your location.
-#
-# In a real app, the browser/app supplies the user's GPS:
-#   navigator.geolocation.getCurrentPosition(pos =>
-#     fetch(`/api/v1/exam-centers/nearby?latitude=${pos.coords.latitude}&longitude=${pos.coords.longitude}&radius_km=50`)
-#   );
-#
-# City reference coordinates (copy-paste the one you need):
-#   Delhi     → latitude=28.6139  longitude=77.2090
-#   Mumbai    → latitude=18.9220  longitude=72.8236
-#   Bangalore → latitude=12.9716  longitude=77.5946
-#   Chennai   → latitude=13.0827  longitude=80.2707
-#   Kolkata   → latitude=22.5726  longitude=88.3639
-#
-# Results are sorted nearest-first and include distance_km.
+docs {
+  Find exam centers within 50 km of your location.
+
+  In a real app, the browser/app supplies the user's GPS:
+    navigator.geolocation.getCurrentPosition(pos =>
+      fetch(`/api/v1/exam-centers/nearby?latitude=${pos.coords.latitude}&longitude=${pos.coords.longitude}&radius_km=50`)
+    );
+
+  City reference coordinates (copy-paste the one you need):
+    Delhi     → latitude=28.6139  longitude=77.2090
+    Mumbai    → latitude=18.9220  longitude=72.8236
+    Bangalore → latitude=12.9716  longitude=77.5946
+    Chennai   → latitude=13.0827  longitude=80.2707
+    Kolkata   → latitude=22.5726  longitude=88.3639
+
+  Results are sorted nearest-first and include distance_km.
+}
 
 get {
   url: {{base_url}}/api/v1/exam-centers/nearby?latitude=12.9716&longitude=77.5946&radius_km=50
