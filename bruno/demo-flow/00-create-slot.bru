@@ -1,0 +1,35 @@
+meta {
+  name: 00 - Create Slot for Demo Exam
+  type: http
+  seq: 0
+}
+
+post {
+  url: {{base_url}}/api/v1/exam-slots
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{admin_token}}
+}
+
+body:json {
+  {
+    "exam_id": "{{created_exam_id}}",
+    "center_id": "ctr-001",
+    "starts_at": "2027-06-01T09:00:00Z",
+    "ends_at": "2027-06-01T12:00:00Z",
+    "capacity": 30
+  }
+}
+
+script:post-response {
+  bru.setVar("demo_new_slot_id", res.body.id);
+  bru.setEnvVar("demo_new_slot_id", res.body.id);
+}
+
+assert {
+  res.status: eq 201
+  res.body.id: isDefined
+}
